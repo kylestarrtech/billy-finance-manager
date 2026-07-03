@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ff7300'];
 
 export default function Dashboard() {
-    const { bills, incomes, exportData, importData } = useFinance();
+    const { bills, incomes, exportData, importData, clearAllData } = useFinance();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,6 +46,16 @@ export default function Dashboard() {
     }));
 
     const hasData = bills.length > 0 || incomes.length > 0;
+
+    const handleDeleteAllData = async () => {
+        const confirmed = window.confirm(
+            'WARNING: This will permanently delete all bills, income, and your PIN-protected vault data. This cannot be undone.\n\nDo you want to continue?'
+        );
+
+        if (!confirmed) return;
+
+        await clearAllData();
+    };
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -123,14 +133,14 @@ export default function Dashboard() {
             {/* Bottom: Charts & Recommendations */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '1.5rem' }}>
                     
-                    {/* 40/30/30 Split Recommendation */}
+                    {/* 50/30/20 Split Recommendation */}
                     <div className="card">
-                        <h3>Savings Recommendation (40/30/30)</h3>
+                        <h3>Savings Recommendation (50/30/20)</h3>
                         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Based on your total normalized monthly income.</p>
                         
                         <div style={{ marginBottom: '1rem' }}>
-                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Needs (40%)</h4>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended: ${(stats.totalMonthlyIncome * 0.40).toFixed(2)}</p>
+                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Needs (50%)</h4>
+                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended: ${(stats.totalMonthlyIncome * 0.50).toFixed(2)}</p>
                             <p style={{ margin: 0, color: 'var(--text-muted)' }}>Actual Essential: ${(stats.essentialExpenses).toFixed(2)}</p>
                         </div>
 
@@ -141,8 +151,8 @@ export default function Dashboard() {
                         </div>
 
                         <div>
-                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Savings/Investing (30%)</h4>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended Goal: ${(stats.totalMonthlyIncome * 0.30).toFixed(2)}</p>
+                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Savings/Investing (20%)</h4>
+                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended Goal: ${(stats.totalMonthlyIncome * 0.20).toFixed(2)}</p>
                             <p style={{ margin: 0, color: 'var(--text-muted)' }}>Actual Leftover: ${(stats.leftoverCash).toFixed(2)}</p>
                         </div>
                     </div>
@@ -192,8 +202,12 @@ export default function Dashboard() {
                     ref={fileInputRef} 
                     onChange={handleImportFile} 
                 />
-                <button className="btn-secondary" onClick={() => fileInputRef.current?.click()}>Import Data from JSON</button>
-                <button className="btn-secondary" onClick={exportData}>Export Data to JSON</button>
+                <button className="btn-standard" onClick={() => fileInputRef.current?.click()}>Import Data from JSON</button>
+                <button className="btn-standard" onClick={exportData}>Export Data to JSON</button>
+            </div>
+
+            <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'center' }}>
+                <button className="btn-danger" onClick={handleDeleteAllData}>Delete All Data</button>
             </div>
             
         </div>
