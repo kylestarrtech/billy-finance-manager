@@ -20,7 +20,7 @@ export default function Bills() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <h2 style={{ margin: 0 }}>Bills</h2>
+                <h2 style={{ margin: 0 }}>Bills ({bills.length})</h2>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     <input 
                         type="text" 

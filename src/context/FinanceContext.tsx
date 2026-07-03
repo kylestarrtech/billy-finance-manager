@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-
+import { createContext, useContext, useState, useEffect, type ReactNode, useRef } from 'react';
+import { storageAdapter } from '../utils/storageAdapter';
+import { encryptData, decryptData } from '../utils/cryptoWrapper';
 
 export const PaymentFrequency = {
     Daily: 'daily',
@@ -37,9 +38,14 @@ export interface Income {
     endingPaymentDate?: string; // im adding this just in case someone has short-term contract work
 }
 
+export type AuthStatus = 'loading' | 'setup' | 'locked' | 'unlocked';
+
 interface FinanceContextType {
     bills: Bill[];
     incomes: Income[];
+    authStatus: AuthStatus;
+    unlockVault: (pin: string) => Promise<boolean>;
+    setupVault: (pin: string) => Promise<void>;
     addBill: (bill: Omit<Bill, 'id'>) => void;
     editBill: (id: string, updatedBill: Omit<Bill, 'id'>) => void;
     deleteBill: (id: string) => void;
@@ -48,37 +54,73 @@ interface FinanceContextType {
     deleteIncome: (id: string) => void;
     exportData: () => void;
     importData: (jsonData: string) => void;
+    clearAllData: () => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const FinanceProvider = ({ children }: { children: ReactNode }) => {
+    const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+    const [bills, setBills] = useState<Bill[]>([]);
+    const [incomes, setIncomes] = useState<Income[]>([]);
+    const currentPinRef = useRef<string | null>(null);
 
-    // grab bills once on initial render via local storage
-    const [bills, setBills] = useState<Bill[]>(() => {
-        const saved = localStorage.getItem('bills');
-        return saved ? JSON.parse(saved) : [];
-    })
-
-    // same thing with income
-    const [incomes, setIncomes] = useState<Income[]>(() => {
-        const saved = localStorage.getItem('incomes');
-        return saved ? JSON.parse(saved) : [];
-    });
-
-    // get save data
-
-    // im adding this comment because i KNOW im going to forget since im still learning this
-    // but useEffect allows us to run "side effects" that will run post-render and only when
-    // the dependencies (which is the last argument) changes. so basically whenever bills
-    // or incomes change in the financeprovider these trigger. it's an autosave.
+    // init
     useEffect(() => {
-        localStorage.setItem('bills', JSON.stringify(bills));
-    }, [bills]);
+        const init = async () => {
+            try {
+                const vault = await storageAdapter.get();
+                if (vault) {
+                    setAuthStatus('locked');
+                } else {
+                    setAuthStatus('setup');
+                }
+            } catch (err) {
+                console.error("StorageAdapter failed to init:", err);
+                // Fallback to setup if reading fails completely
+                setAuthStatus('setup');
+            }
+        };
+        init();
+    }, []);
 
+    const unlockVault = async (pin: string): Promise<boolean> => {
+        const vault = await storageAdapter.get();
+        if (!vault) return false;
+        try {
+            const decrypted = await decryptData(vault, pin);
+            const parsed = JSON.parse(decrypted);
+            setBills(parsed.bills || []);
+            setIncomes(parsed.incomes || []);
+            currentPinRef.current = pin;
+            setAuthStatus('unlocked');
+            return true;
+        } catch (error) {
+            return false;
+        }
+    };
+
+    const setupVault = async (pin: string) => {
+        currentPinRef.current = pin;
+        setAuthStatus('unlocked');
+        
+        // immediately trigger a save so the vault is actually created (it crashes if i dont do this)
+        const payload = JSON.stringify({ bills, incomes });
+        const encrypted = await encryptData(payload, pin);
+        await storageAdapter.set(encrypted);
+    };
+
+    // autosave
     useEffect(() => {
-        localStorage.setItem('incomes', JSON.stringify(incomes));
-    }, [incomes]);
+        if (authStatus === 'unlocked' && currentPinRef.current) {
+            const save = async () => {
+                const payload = JSON.stringify({ bills, incomes });
+                const encrypted = await encryptData(payload, currentPinRef.current!);
+                await storageAdapter.set(encrypted);
+            };
+            save();
+        }
+    }, [bills, incomes, authStatus]);
 
     const addBill = (bill: Omit<Bill, 'id'>) => {
         const newBill = { ...bill, id: crypto.randomUUID() };
@@ -111,7 +153,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const exportData = () => {
-        if (window.confirm('WARNING: Exporting data will download your sensitive financial information to your device unencrypted. Please ensure your device is secure. Do you wish to proceed?')) {
+        if (window.confirm('WARNING: Exporting data will download your sensitive financial information to your device unencrypted. Please ensure your device is secure. If you do proceed, please check your Downloads folder.\n\n npDo you wish to proceed?')) {
             const dataStr = JSON.stringify({ bills, incomes }, null, 2);
             const blob = new Blob([dataStr], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -140,10 +182,23 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
+    const clearAllData = async () => {
+        await storageAdapter.clear();
+        localStorage.removeItem('bills');
+        localStorage.removeItem('incomes');
+        setBills([]);
+        setIncomes([]);
+        currentPinRef.current = null;
+        setAuthStatus('setup');
+    };
+
     return (
         <FinanceContext.Provider value={{
             bills,
             incomes,
+            authStatus,
+            unlockVault,
+            setupVault,
             addBill,
             editBill,
             deleteBill,
@@ -151,7 +206,8 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             editIncome,
             deleteIncome,
             exportData,
-            importData
+            importData,
+            clearAllData
         }}
     >
         {children}

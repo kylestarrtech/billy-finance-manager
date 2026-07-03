@@ -6,10 +6,14 @@ import AddBill from './components/AddBill'
 import AddIncome from './components/AddIncome'
 import Bills from './components/Bills'
 import Income from './components/Income'
+import PinScreen from './components/PinScreen'
+import PrivacyScreen from './components/PrivacyScreen'
+import { useFinance } from './context/FinanceContext'
 
-type ViewState = 'dashboard' | 'bills' | 'income'
+type ViewState = 'dashboard' | 'bills' | 'income' | 'privacy';
 
 function App() {
+  const { authStatus } = useFinance();
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
 
   // modals
@@ -36,10 +40,15 @@ function App() {
         return <Bills />;
       case 'income':
         return <Income />;
+      case 'privacy':
+        return <PrivacyScreen />;
       default:
         return <Dashboard />;
     }
   }
+
+  if (authStatus === 'loading') return <h1 style={{color: 'white', position: 'absolute', top: '50px', left: '50px'}}>Loading Vault Status: {authStatus}</h1>;
+  if (authStatus === 'locked' || authStatus === 'setup') return <PinScreen />;
 
   return (
     <>
@@ -76,6 +85,13 @@ function App() {
               >
                 Income
               </button>
+
+            <button
+              className={currentView === 'privacy' ? 'active-tab' : ''}
+              onClick={() => setCurrentView('privacy')}
+              >
+                Privacy
+              </button>
           </nav>
         </div>
         
@@ -90,7 +106,7 @@ function App() {
         </div>
       </header>
 
-      <main className="app-main">
+      <main key={currentView} className="app-main">
         {renderView()}
       </main>
 
