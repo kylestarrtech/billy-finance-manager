@@ -73,7 +73,7 @@ export default function Dashboard() {
                 <>
                 {/* Top: Upcoming Expenses */}
                 <div className="card">
-                    <h2>Upcoming Expenses</h2>
+                    <h2 style={{ marginTop: 0 }}>Upcoming Expenses</h2>
                 {upcoming.length === 0 ? (
                     <p style={{ color: 'var(--text-muted)' }}>No upcoming bills.</p>
                 ) : (
@@ -94,7 +94,7 @@ export default function Dashboard() {
             {/* Middle: Key Metrics */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '1.5rem' }}>
                 <div className="card">
-                    <h3>Monthly Income</h3>
+                    <h3 style={{ marginTop: 0 }}>Monthly Income</h3>
                     <h2 style={{ fontSize: '2.5rem', margin: '0.5rem 0', color: 'var(--color-gain)' }}>
                         ${stats.totalMonthlyIncome.toFixed(2)}
                     </h2>
@@ -107,7 +107,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="card">
-                    <h3>Monthly Expenses</h3>
+                    <h3 style={{ marginTop: 0 }}>Monthly Expenses</h3>
                     <h2 style={{ fontSize: '2.5rem', margin: '0.5rem 0', color: 'var(--color-loss)' }}>
                         ${stats.totalMonthlyExpenses.toFixed(2)}
                     </h2>
@@ -120,7 +120,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className={`card ${isNetPositive ? 'outline-gain' : 'outline-loss'}`}>
-                    <h3>Remaining</h3>
+                    <h3 style={{ marginTop: 0 }}>Remaining</h3>
                     <h2 style={{ fontSize: '2.5rem', margin: '0.5rem 0', color: isNetPositive ? 'var(--color-gain)' : 'var(--color-loss)' }}>
                         {isNetPositive ? '+' : '-'}${Math.abs(stats.leftoverCash).toFixed(2)}
                     </h2>
@@ -135,7 +135,7 @@ export default function Dashboard() {
                     
                     {/* 50/30/20 Split Recommendation */}
                     <div className="card">
-                        <h3>Savings Recommendation (50/30/20)</h3>
+                        <h3 style={{ marginTop: 0 }}>Savings Recommendation (50/30/20)</h3>
                         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Based on your total normalized monthly income.</p>
                         
                         <div style={{ marginBottom: '1rem' }}>
@@ -159,7 +159,7 @@ export default function Dashboard() {
 
                     {/* Pie Charts */}
                     <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-                        <h3>Cash Flow Breakdown</h3>
+                        <h3 style={{ marginTop: 0 }}>Cash Flow Breakdown</h3>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', flex: 1 }}>
                             <div style={{ flex: '1 1 200px', height: '250px' }}>
                                 <h4 style={{ textAlign: 'center', margin: '0.5rem 0' }}>Income</h4>

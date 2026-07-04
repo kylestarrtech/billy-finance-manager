@@ -51,7 +51,7 @@ export default function AddBill({ onClose, billToEdit }: AddBillProps) {
     return (
         <div className={`modal-backdrop ${isClosing ? 'closing' : ''}`} onMouseDown={handleClose}>
             <div className="modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
-                <h2>{billToEdit ? 'Edit Bill' : 'Add Bill'}</h2>
+                <h2 style={{ marginTop: 0 }}>{billToEdit ? 'Edit Bill' : 'Add Bill'}</h2>
             <form onSubmit={handleSubmit}>
                 <div className="form-group">
                     <label>Name</label>
