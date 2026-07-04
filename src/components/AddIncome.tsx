@@ -43,7 +43,7 @@ export default function AddIncome({ onClose, incomeToEdit }: AddIncomeProps) {
     return (
         <div className={`modal-backdrop ${isClosing ? 'closing' : ''}`} onMouseDown={handleClose}>
             <div className="modal-content" onMouseDown={(e) => e.stopPropagation()}>
-                <h2>{incomeToEdit ? 'Edit Income' : 'Add Income'}</h2>
+                <h2 style={{ marginTop: 0 }}>{incomeToEdit ? 'Edit Income' : 'Add Income'}</h2>
             <form onSubmit={handleSubmit}>
                 <div className="form-group">
                     <label>Name</label>
