@@ -1,0 +1,122 @@
+# Builds an UNSIGNED Billy.ipa on a GitHub-hosted Mac, for sideloading with a free Apple ID
+# (Sideloadly, AltStore, SideStore, ...). No Apple Developer account, certificates or secrets needed:
+# the sideloading tool signs the app with your own Apple ID when it installs it.
+#
+# Run it from the repo's Actions tab ("Run workflow"), or push a tag like `v1.0.1` to also attach the
+# .ipa to a GitHub Release.
+
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# Starting a new run on the same branch/tag cancels the one in progress.
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    # macOS 26 ships Xcode 26.x by default; Expo SDK 57 needs Xcode 26.4 or newer.
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      # Only used by the "Attach to GitHub Release" step on tag pushes.
+      contents: write
+    env:
+      EXPO_NO_TELEMETRY: 1
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Cache CocoaPods downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: cocoapods-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: cocoapods-${{ runner.os }}-
+
+      # Generates ios/ from app.json and the installed modules, then runs `pod install`.
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios
+
+      - name: Build unsigned archive
+        run: |
+          # Named after "expo.name" in app.json (currently "Billy").
+          WORKSPACES=(ios/*.xcworkspace)
+          WORKSPACE="${WORKSPACES[0]}"
+          test -d "$WORKSPACE" || { echo "::error::No .xcworkspace found in ios/ (did pod install run?)"; exit 1; }
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Building scheme '$SCHEME' from $WORKSPACE"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+
+          xcodebuild archive \
+            -quiet \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/$SCHEME.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package .ipa
+        run: |
+          APP="$RUNNER_TEMP/$SCHEME.xcarchive/Products/Applications/$SCHEME.app"
+          test -d "$APP" || { echo "::error::Built app not found at $APP"; exit 1; }
+
+          VERSION=$(node -p "require('./app.json').expo.version")
+          IPA_NAME="$SCHEME-$VERSION-build$GITHUB_RUN_NUMBER-unsigned.ipa"
+
+          STAGING="$RUNNER_TEMP/ipa"
+          rm -rf "$STAGING" && mkdir -p "$STAGING/Payload"
+          cp -R "$APP" "$STAGING/Payload/"
+          # Sideloading tools re-sign everything; leftover signatures from prebuilt frameworks can confuse them.
+          find "$STAGING/Payload" -name _CodeSignature -type d -prune -exec rm -rf {} +
+          (cd "$STAGING" && zip -qry "$GITHUB_WORKSPACE/$IPA_NAME" Payload)
+
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
+          ls -lh "$GITHUB_WORKSPACE/$IPA_NAME"
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.IPA_NAME }}
+          path: ${{ env.IPA_NAME }}
+          if-no-files-found: error
+          retention-days: 30
+          # An .ipa is already a zip; don't spend time compressing it again.
+          compression-level: 0
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$IPA_NAME" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$IPA_NAME" --title "Billy $GITHUB_REF_NAME" --generate-notes
+          fi

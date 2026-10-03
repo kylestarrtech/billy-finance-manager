@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Billy",
+    "slug": "billy-finance-manager",
+    "version": "1.0.0",
+    "scheme": "billy",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#141414",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kylestarrtech.billybillmanager"
+    },
+    "android": {
+      "package": "com.kylestarrtech.billybillmanager",
+      "adaptiveIcon": {
+        "backgroundColor": "#141414",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 140,
+          "resizeMode": "contain",
+          "backgroundColor": "#141414"
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-router"
+    ]
+  }
+}
