@@ -1,32 +1,41 @@
-import { useRef } from 'react';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { File } from 'expo-file-system';
 import { useFinance } from '../context/FinanceContext';
 import { getSummaryStats, getUpcomingBills, normalizeToMonthly } from '../utils/financeHelpers';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { formatDate } from '../utils/dates';
+import { confirmAsync, showAlert } from '../utils/dialogs';
+import { colors, fonts } from '../theme';
+import AppText from './ui/AppText';
+import Button from './ui/Button';
+import Card from './ui/Card';
+import PieChart from './ui/PieChart';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ff7300'];
+const WIDE_LAYOUT = 700;
 
 export default function Dashboard() {
     const { bills, incomes, exportData, importData, clearAllData } = useFinance();
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const { width } = useWindowDimensions();
+    const isWide = width >= WIDE_LAYOUT;
 
-    const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    const handleImportFile = async () => {
+        // expo-file-system's own picker grants read access to the chosen file (Expo Go's sandbox
+        // refuses to read files handed over by other modules). Cloud providers often report JSON as
+        // octet-stream, so any file is allowed and validated when parsed.
+        const picked = await File.pickFileAsync({ mimeTypes: '*/*' });
+        if (picked.canceled) return;
 
-        if (window.confirm('WARNING: Importing data will OVERWRITE all your current bills and income data. Do you wish to proceed?')) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const result = event.target?.result;
-                if (typeof result === 'string') {
-                    importData(result);
-                }
-            };
-            reader.readAsText(file);
-        }
+        const confirmed = await confirmAsync(
+            'Import Data',
+            'WARNING: Importing data will OVERWRITE all your current bills and income data. Do you wish to proceed?',
+            { confirmText: 'Overwrite', destructive: true }
+        );
+        if (!confirmed) return;
 
-        // Reset the file input so the same file could potentially be imported again
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
+        try {
+            importData(await picked.result.text());
+        } catch (error) {
+            console.warn('Import read failed:', error);
+            showAlert('Import Failed', 'Could not read the selected file.');
         }
     };
 
@@ -48,8 +57,10 @@ export default function Dashboard() {
     const hasData = bills.length > 0 || incomes.length > 0;
 
     const handleDeleteAllData = async () => {
-        const confirmed = window.confirm(
-            'WARNING: This will permanently delete all bills, income, and your PIN-protected vault data. This cannot be undone.\n\nDo you want to continue?'
+        const confirmed = await confirmAsync(
+            'Delete All Data',
+            'WARNING: This will permanently delete all bills, income, and your PIN-protected vault data. This cannot be undone.\n\nDo you want to continue?',
+            { confirmText: 'Delete Everything', destructive: true }
         );
 
         if (!confirmed) return;
@@ -57,159 +68,201 @@ export default function Dashboard() {
         await clearAllData();
     };
 
+    const rowStyle = isWide ? styles.row : styles.column;
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            
+        <View style={styles.page}>
+
             {!hasData && (
-                <div className="card" style={{ textAlign: 'center', borderColor: 'var(--color-gain)', background: '#22222280' }}>
-                    <h2 style={{ margin: '0 0 1rem 0' }}>Welcome to Billy Bill Manager!</h2>
-                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        To get started and activate your dashboard metrics, please add your first income source or bill up top.
-                    </p>
-                </div>
+                <Card style={styles.welcome}>
+                    <AppText variant="h2" center style={styles.welcomeTitle}>Welcome to Billy Bill Manager!</AppText>
+                    <AppText muted center>
+                        To get started and activate your dashboard metrics, please add your first income source or bill using the + Bill and + Income buttons.
+                    </AppText>
+                </Card>
             )}
 
             {hasData && (
                 <>
                 {/* Top: Upcoming Expenses */}
-                <div className="card">
-                    <h2 style={{ marginTop: 0 }}>Upcoming Expenses</h2>
-                {upcoming.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)' }}>No upcoming bills.</p>
-                ) : (
-                    <div className="upcoming-expenses-container">
-                        {upcoming.map((u, i) => (
-                            <div key={i} className="card" style={{ padding: '1rem', background: '#2a2a2a40' }}>
-                                <h4 style={{ margin: '0 0 0.5rem 0' }}>{u.bill.name}</h4>
-                                <p style={{ margin: 0, fontWeight: 'bold' }}>${u.bill.cost.toFixed(2)}</p>
-                                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.9em', color: 'var(--text-muted)' }}>
-                                    Due: {u.nextDate.toLocaleDateString()}
-                                </p>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+                <Card>
+                    <AppText variant="h2" style={styles.cardTitle}>Upcoming Expenses</AppText>
+                    {upcoming.length === 0 ? (
+                        <AppText muted>No upcoming bills.</AppText>
+                    ) : (
+                        <View style={styles.upcomingList}>
+                            {upcoming.map((u) => (
+                                <Card key={u.bill.id} style={styles.upcomingCard}>
+                                    <AppText variant="h4" style={styles.upcomingName}>{u.bill.name}</AppText>
+                                    <AppText bold>${u.bill.cost.toFixed(2)}</AppText>
+                                    <AppText variant="small" muted style={styles.upcomingDue}>
+                                        Due: {formatDate(u.nextDate)}
+                                    </AppText>
+                                </Card>
+                            ))}
+                        </View>
+                    )}
+                </Card>
 
-            {/* Middle: Key Metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '1.5rem' }}>
-                <div className="card">
-                    <h3 style={{ marginTop: 0 }}>Monthly Income</h3>
-                    <h2 style={{ fontSize: '2.5rem', margin: '0.5rem 0', color: 'var(--color-gain)' }}>
-                        ${stats.totalMonthlyIncome.toFixed(2)}
-                    </h2>
-                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        Weekly Avg: ${stats.weeklyIncome.toFixed(2)}
-                    </p>
-                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        Daily Avg: ${stats.dailyIncome.toFixed(2)}
-                    </p>
-                </div>
+                {/* Middle: Key Metrics */}
+                <View style={rowStyle}>
+                    <Card style={isWide && styles.flexCell}>
+                        <AppText variant="h3">Monthly Income</AppText>
+                        <AppText style={styles.bigNumber} color={colors.gain} adjustsFontSizeToFit numberOfLines={1}>
+                            ${stats.totalMonthlyIncome.toFixed(2)}
+                        </AppText>
+                        <AppText muted>
+                            Weekly Avg: ${stats.weeklyIncome.toFixed(2)}
+                        </AppText>
+                        <AppText muted>
+                            Daily Avg: ${stats.dailyIncome.toFixed(2)}
+                        </AppText>
+                    </Card>
 
-                <div className="card">
-                    <h3 style={{ marginTop: 0 }}>Monthly Expenses</h3>
-                    <h2 style={{ fontSize: '2.5rem', margin: '0.5rem 0', color: 'var(--color-loss)' }}>
-                        ${stats.totalMonthlyExpenses.toFixed(2)}
-                    </h2>
-                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        Weekly Avg: ${stats.weeklyExpenses.toFixed(2)}
-                    </p>
-                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        Daily Avg: ${stats.dailyExpenses.toFixed(2)}
-                    </p>
-                </div>
+                    <Card style={isWide && styles.flexCell}>
+                        <AppText variant="h3">Monthly Expenses</AppText>
+                        <AppText style={styles.bigNumber} color={colors.loss} adjustsFontSizeToFit numberOfLines={1}>
+                            ${stats.totalMonthlyExpenses.toFixed(2)}
+                        </AppText>
+                        <AppText muted>
+                            Weekly Avg: ${stats.weeklyExpenses.toFixed(2)}
+                        </AppText>
+                        <AppText muted>
+                            Daily Avg: ${stats.dailyExpenses.toFixed(2)}
+                        </AppText>
+                    </Card>
 
-                <div className={`card ${isNetPositive ? 'outline-gain' : 'outline-loss'}`}>
-                    <h3 style={{ marginTop: 0 }}>Remaining</h3>
-                    <h2 style={{ fontSize: '2.5rem', margin: '0.5rem 0', color: isNetPositive ? 'var(--color-gain)' : 'var(--color-loss)' }}>
-                        {isNetPositive ? '+' : '-'}${Math.abs(stats.leftoverCash).toFixed(2)}
-                    </h2>
-                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        {isNetPositive ? 'You are cash-positive this month.' : 'You are spending more than you earn!'}
-                    </p>
-                </div>
-            </div>
+                    <Card tone={isNetPositive ? 'gain' : 'loss'} style={isWide && styles.flexCell}>
+                        <AppText variant="h3">Remaining</AppText>
+                        <AppText style={styles.bigNumber} color={isNetPositive ? colors.gain : colors.loss} adjustsFontSizeToFit numberOfLines={1}>
+                            {isNetPositive ? '+' : '-'}${Math.abs(stats.leftoverCash).toFixed(2)}
+                        </AppText>
+                        <AppText muted>
+                            {isNetPositive ? 'You are cash-positive this month.' : 'You are spending more than you earn!'}
+                        </AppText>
+                    </Card>
+                </View>
 
-            {/* Bottom: Charts & Recommendations */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '1.5rem' }}>
-                    
+                {/* Bottom: Charts & Recommendations */}
+                <View style={rowStyle}>
+
                     {/* 50/30/20 Split Recommendation */}
-                    <div className="card">
-                        <h3 style={{ marginTop: 0 }}>Savings Recommendation (50/30/20)</h3>
-                        <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Based on your total normalized monthly income.</p>
-                        
-                        <div style={{ marginBottom: '1rem' }}>
-                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Needs (50%)</h4>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended: ${(stats.totalMonthlyIncome * 0.50).toFixed(2)}</p>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Actual Essential: ${(stats.essentialExpenses).toFixed(2)}</p>
-                        </div>
+                    <Card style={isWide && styles.flexCell}>
+                        <AppText variant="h3">Savings Recommendation (50/30/20)</AppText>
+                        <AppText muted style={styles.recommendationIntro}>Based on your total normalized monthly income.</AppText>
 
-                        <div style={{ marginBottom: '1rem' }}>
-                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Wants (30%)</h4>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended Limit: ${(stats.totalMonthlyIncome * 0.30).toFixed(2)}</p>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Actual Non-essential: ${(stats.totalMonthlyExpenses - stats.essentialExpenses).toFixed(2)}</p>
-                        </div>
+                        <View style={styles.recommendation}>
+                            <AppText variant="h4" style={styles.recommendationTitle}>Needs (50%)</AppText>
+                            <AppText muted>Recommended: ${(stats.totalMonthlyIncome * 0.50).toFixed(2)}</AppText>
+                            <AppText muted>Actual Essential: ${(stats.essentialExpenses).toFixed(2)}</AppText>
+                        </View>
 
-                        <div>
-                            <h4 style={{ margin: '0 0 0.25rem 0' }}>Savings/Investing (20%)</h4>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Recommended Goal: ${(stats.totalMonthlyIncome * 0.20).toFixed(2)}</p>
-                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>Actual Leftover: ${(stats.leftoverCash).toFixed(2)}</p>
-                        </div>
-                    </div>
+                        <View style={styles.recommendation}>
+                            <AppText variant="h4" style={styles.recommendationTitle}>Wants (30%)</AppText>
+                            <AppText muted>Recommended Limit: ${(stats.totalMonthlyIncome * 0.30).toFixed(2)}</AppText>
+                            <AppText muted>Actual Non-essential: ${(stats.totalMonthlyExpenses - stats.essentialExpenses).toFixed(2)}</AppText>
+                        </View>
+
+                        <View>
+                            <AppText variant="h4" style={styles.recommendationTitle}>Savings/Investing (20%)</AppText>
+                            <AppText muted>Recommended Goal: ${(stats.totalMonthlyIncome * 0.20).toFixed(2)}</AppText>
+                            <AppText muted>Actual Leftover: ${(stats.leftoverCash).toFixed(2)}</AppText>
+                        </View>
+                    </Card>
 
                     {/* Pie Charts */}
-                    <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-                        <h3 style={{ marginTop: 0 }}>Cash Flow Breakdown</h3>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', flex: 1 }}>
-                            <div style={{ flex: '1 1 200px', height: '250px' }}>
-                                <h4 style={{ textAlign: 'center', margin: '0.5rem 0' }}>Income</h4>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie data={incomeData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={false}>
-                                            {incomeData.map((_, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip formatter={(value: any) => `$${Number(value).toFixed(2)}`} />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                            </div>
-                            <div style={{ flex: '1 1 200px', height: '250px' }}>
-                                <h4 style={{ textAlign: 'center', margin: '0.5rem 0' }}>Expenses</h4>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie data={expenseData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={false}>
-                                            {expenseData.map((_, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip formatter={(value: any) => `$${Number(value).toFixed(2)}`} />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-                    </div>
+                    <Card style={isWide && styles.flexCell}>
+                        <AppText variant="h3">Cash Flow Breakdown</AppText>
+                        <View style={styles.charts}>
+                            <PieChart title="Income" data={incomeData} />
+                            <PieChart title="Expenses" data={expenseData} />
+                        </View>
+                    </Card>
 
-                </div>
+                </View>
                 </>
             )}
 
-            <div className="desktop-only" style={{ marginTop: 'auto', paddingTop: '2rem', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
-                <input 
-                    type="file" 
-                    accept=".json" 
-                    style={{ display: 'none' }} 
-                    ref={fileInputRef} 
-                    onChange={handleImportFile} 
-                />
-                <button className="btn-standard" onClick={() => fileInputRef.current?.click()}>Import Data from JSON</button>
-                <button className="btn-standard" onClick={exportData}>Export Data to JSON</button>
-            </div>
+            <View style={styles.dataActions}>
+                <Button title="Import Data from JSON" onPress={handleImportFile} />
+                <Button title="Export Data to JSON" onPress={exportData} />
+            </View>
 
-            <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'center' }}>
-                <button className="btn-danger" onClick={handleDeleteAllData}>Delete All Data</button>
-            </div>
-            
-        </div>
+            <View style={styles.dangerZone}>
+                <Button title="Delete All Data" variant="danger" onPress={handleDeleteAllData} />
+            </View>
+
+        </View>
     );
 }
+
+const styles = StyleSheet.create({
+    page: {
+        gap: 24,
+    },
+    welcome: {
+        borderWidth: 1,
+        borderColor: colors.gain,
+        backgroundColor: '#22222280',
+    },
+    welcomeTitle: {
+        marginBottom: 16,
+    },
+    cardTitle: {
+        marginBottom: 12,
+    },
+    upcomingList: {
+        gap: 12,
+    },
+    upcomingCard: {
+        padding: 16,
+        backgroundColor: colors.cardInner,
+    },
+    upcomingName: {
+        marginBottom: 6,
+    },
+    upcomingDue: {
+        marginTop: 6,
+    },
+    row: {
+        flexDirection: 'row',
+        gap: 20,
+    },
+    column: {
+        gap: 20,
+    },
+    flexCell: {
+        flex: 1,
+    },
+    bigNumber: {
+        fontSize: 36,
+        lineHeight: 48,
+        fontFamily: fonts.bold,
+        marginVertical: 6,
+    },
+    recommendationIntro: {
+        marginTop: 4,
+        marginBottom: 20,
+    },
+    recommendation: {
+        marginBottom: 16,
+    },
+    recommendationTitle: {
+        marginBottom: 4,
+    },
+    charts: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 16,
+    },
+    dataActions: {
+        paddingTop: 16,
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: 12,
+    },
+    dangerZone: {
+        alignItems: 'center',
+    },
+});

@@ -1,4 +1,5 @@
-import { type Bill, type Income, PaymentFrequency } from '../context/FinanceContext.tsx';
+import { type Bill, type Income, PaymentFrequency } from '../context/FinanceContext';
+import { parseISODate, startOfToday } from './dates';
 
 export const normalizeToMonthly = (amount: number, frequency: PaymentFrequency): number => {
     switch (frequency) {
@@ -55,7 +56,7 @@ export const getSummaryStats = (bills: Bill[], incomes: Income[]) => {
         }, 0);
 
     const leftoverCash = totalMonthlyIncome - totalMonthlyExpenses;
-    
+
     // Enhanced Stats Breakdown
     const dailyIncome = (totalMonthlyIncome * 12) / 365;
     const weeklyIncome = (totalMonthlyIncome * 12) / 52;
@@ -74,47 +75,64 @@ export const getSummaryStats = (bills: Bill[], incomes: Income[]) => {
     }
 };
 
+const DAY_STEPS: Partial<Record<PaymentFrequency, number>> = {
+    [PaymentFrequency.Daily]: 1,
+    [PaymentFrequency.Weekly]: 7,
+    [PaymentFrequency.Biweekly]: 14,
+};
+
+const MONTH_STEPS: Partial<Record<PaymentFrequency, number>> = {
+    [PaymentFrequency.Monthly]: 1,
+    [PaymentFrequency.Bimonthly]: 2,
+    [PaymentFrequency.Quarterly]: 3,
+    [PaymentFrequency.Semiannually]: 6,
+    [PaymentFrequency.Annually]: 12,
+};
+
+// Whole calendar days between two local dates, immune to DST shifts.
+const daysBetween = (from: Date, to: Date) =>
+    Math.round(
+        (Date.UTC(to.getFullYear(), to.getMonth(), to.getDate()) -
+            Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86_400_000
+    );
+
+// Adds months while clamping to the end of shorter months, so a bill due on the 31st stays
+// "end of month" instead of drifting (Jan 31 -> Feb 28 -> Mar 31, not Jan 31 -> Mar 3 -> Apr 3).
+const addMonthsClamped = (date: Date, months: number) => {
+    const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(date.getDate(), lastDay));
+    return target;
+};
+
 export const getNextPaymentDetails = (bill: Bill) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = startOfToday();
+    const firstDate = parseISODate(bill.firstPaymentDate);
 
-    let nextDate = new Date(bill.firstPaymentDate);
-    nextDate.setHours(0, 0, 0, 0);
-
+    let nextDate = firstDate;
     let paymentsMade = 0;
-    while (nextDate < today && paymentsMade < 1000) {
-        paymentsMade++;
-        switch (bill.frequency) {
-            case PaymentFrequency.Daily:
-                nextDate.setDate(nextDate.getDate() + 1);
-                break;
-            case PaymentFrequency.Weekly:
-                nextDate.setDate(nextDate.getDate() + 7);
-                break;
-            case PaymentFrequency.Biweekly:
-                nextDate.setDate(nextDate.getDate() + 14);
-                break;
-            case PaymentFrequency.Monthly:
-                nextDate.setMonth(nextDate.getMonth() + 1);
-                break;
-            case PaymentFrequency.Bimonthly:
-                nextDate.setMonth(nextDate.getMonth() + 2);
-                break;
-            case PaymentFrequency.Quarterly:
-                nextDate.setMonth(nextDate.getMonth() + 3);
-                break;
-            case PaymentFrequency.Semiannually:
-                nextDate.setMonth(nextDate.getMonth() + 6);
-                break;
-            case PaymentFrequency.Annually:
-                nextDate.setFullYear(nextDate.getFullYear() + 1);
-                break;
-            case PaymentFrequency.Onetime:
-                nextDate.setFullYear(nextDate.getFullYear() + 100);
-                break;
-            default:
-                nextDate.setMonth(nextDate.getMonth() + 1);
-                break;
+    // true once a one-time payment is in the past and nothing else is due
+    let isComplete = false;
+
+    if (firstDate < today) {
+        const dayStep = DAY_STEPS[bill.frequency];
+        const monthStep = MONTH_STEPS[bill.frequency];
+
+        if (dayStep) {
+            paymentsMade = Math.ceil(daysBetween(firstDate, today) / dayStep);
+            nextDate = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate() + paymentsMade * dayStep);
+        } else if (monthStep) {
+            const monthsElapsed = (today.getFullYear() - firstDate.getFullYear()) * 12 + (today.getMonth() - firstDate.getMonth());
+            paymentsMade = Math.max(0, Math.floor(monthsElapsed / monthStep));
+            nextDate = addMonthsClamped(firstDate, paymentsMade * monthStep);
+            while (nextDate < today) {
+                paymentsMade++;
+                nextDate = addMonthsClamped(firstDate, paymentsMade * monthStep);
+            }
+        } else {
+            // One-time payment already happened.
+            paymentsMade = 1;
+            isComplete = true;
         }
     }
 
@@ -122,24 +140,18 @@ export const getNextPaymentDetails = (bill: Bill) => {
     let remainingBalance = 0;
     if (bill.isFinanced && bill.totalLoanAmount) {
         remainingBalance = Math.max(0, bill.totalLoanAmount - (bill.cost * paymentsMade));
-        paymentsLeft = Math.ceil(remainingBalance / bill.cost);
+        paymentsLeft = bill.cost > 0 ? Math.ceil(remainingBalance / bill.cost) : 0;
     }
 
-    return { nextDate, paymentsMade, remainingBalance, paymentsLeft };
+    return { nextDate, paymentsMade, remainingBalance, paymentsLeft, isComplete };
 };
 
 export const getUpcomingBills = (bills: Bill[]): { bill: Bill; nextDate: Date }[] => {
-    const today = new Date();
-    // Setting to midnight to avoid time-of-day discrepancies
-    today.setHours(0,0,0,0);
+    const upcoming = bills
+        .map(bill => ({ bill, details: getNextPaymentDetails(bill) }))
+        // filter out one-time bills that have already been paid
+        .filter(u => !u.details.isComplete)
+        .map(u => ({ bill: u.bill, nextDate: u.details.nextDate }));
 
-    const upcoming = bills.map(bill => {
-        const details = getNextPaymentDetails(bill);
-        return { bill, nextDate: details.nextDate };
-    });
-
-    // filter out those unrealistic onetime past ones
-    const validUpcoming = upcoming.filter(u => u.nextDate.getFullYear() - today.getFullYear() < 50);
-
-    return validUpcoming.sort((a, b) => a.nextDate.getTime() - b.nextDate.getTime()).slice(0, 5);
+    return upcoming.sort((a, b) => a.nextDate.getTime() - b.nextDate.getTime()).slice(0, 5);
 };

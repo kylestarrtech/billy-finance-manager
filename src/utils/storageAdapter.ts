@@ -1,48 +1,46 @@
-import { BaseDirectory, readTextFile, writeTextFile, remove, mkdir, exists } from '@tauri-apps/plugin-fs';
+import { File, Paths } from 'expo-file-system';
 
+// The encrypted vault lives in the app's private documents directory (the mobile equivalent of the
+// Tauri AppData file). Nothing in here is readable by other apps.
 const FILE_NAME = 'billy_secure_vault.json';
+const TEMP_FILE_NAME = `${FILE_NAME}.tmp`;
 
-const isTauri = () => {
-    return '__TAURI_INTERNALS__' in window;
-};
+const vaultFile = () => new File(Paths.document, FILE_NAME);
+const tempFile = () => new File(Paths.document, TEMP_FILE_NAME);
 
 export const storageAdapter = {
     async get(): Promise<string | null> {
-        if (isTauri()) {
-            try {
-                if (await exists(FILE_NAME, { baseDir: BaseDirectory.AppData })) {
-                    return await readTextFile(FILE_NAME, { baseDir: BaseDirectory.AppData });
-                }
-                return null;
-            } catch (e) {
-                // file might not exist yet
-                return null;
-            }
+        try {
+            const vault = vaultFile();
+            if (vault.exists) return await vault.text();
+
+            // A previous write may have been interrupted between the delete and the rename.
+            const temp = tempFile();
+            if (temp.exists) return await temp.text();
+            return null;
+        } catch (e) {
+            console.warn('storageAdapter.get failed:', e);
+            return null;
         }
-        return localStorage.getItem('billy_secure_vault');
     },
     async set(data: string): Promise<void> {
-        if (isTauri()) {
-            try {
-                if (!(await exists('', { baseDir: BaseDirectory.AppData }))) {
-                    await mkdir('', { baseDir: BaseDirectory.AppData, recursive: true });
-                }
-            } catch (e) {
-                // The dir might already exist during the race condition
-            }
+        // Write to a temp file first and swap it in, so a crash mid-write can't corrupt the vault.
+        const temp = tempFile();
+        if (temp.exists) temp.delete();
+        temp.create();
+        temp.write(data);
 
-            await writeTextFile(FILE_NAME, data, { baseDir: BaseDirectory.AppData });
-            return;
-        }
-        localStorage.setItem('billy_secure_vault', data);
+        const vault = vaultFile();
+        if (vault.exists) vault.delete();
+        temp.rename(FILE_NAME);
     },
     async clear(): Promise<void> {
-        if (isTauri()) {
+        for (const file of [vaultFile(), tempFile()]) {
             try {
-                await remove(FILE_NAME, { baseDir: BaseDirectory.AppData });
-            } catch (e) {}
-            return;
+                if (file.exists) file.delete();
+            } catch (e) {
+                console.warn('storageAdapter.clear failed:', e);
+            }
         }
-        localStorage.removeItem('billy_secure_vault');
     }
 };

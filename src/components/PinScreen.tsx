@@ -1,41 +1,118 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFinance } from '../context/FinanceContext';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
+import { confirmAsync } from '../utils/dialogs';
+import { haptics } from '../utils/haptics';
+import { colors, fonts, radius } from '../theme';
+import AppText from './ui/AppText';
+import Button from './ui/Button';
+import Card from './ui/Card';
+import Logo from './ui/Logo';
+
+const PIN_LENGTH = 6;
+
+function PinInput({ inputRef, value, onChangeText, editable }: {
+    inputRef?: RefObject<TextInput | null>;
+    value: string;
+    onChangeText: (value: string) => void;
+    editable: boolean;
+}) {
+    return (
+        <TextInput
+            ref={inputRef}
+            value={value}
+            onChangeText={text => onChangeText(text.replace(/\D/g, '').slice(0, PIN_LENGTH))}
+            maxLength={PIN_LENGTH}
+            secureTextEntry
+            keyboardType="number-pad"
+            keyboardAppearance="dark"
+            textContentType="none"
+            autoComplete="off"
+            placeholder="••••••"
+            placeholderTextColor={colors.placeholder}
+            selectionColor={colors.gain}
+            editable={editable}
+            style={styles.pinInput}
+        />
+    );
+}
 
 export default function PinScreen() {
     const { authStatus, unlockVault, setupVault, clearAllData } = useFinance();
+    const insets = useSafeAreaInsets();
+    const keyboardHeight = useKeyboardHeight();
     const [pin, setPin] = useState('');
     const [confirmPin, setConfirmPin] = useState('');
     const [error, setError] = useState('');
+    const [isBusy, setIsBusy] = useState(false);
+    const pinRef = useRef<TextInput>(null);
+    const confirmRef = useRef<TextInput>(null);
 
     const isSetup = authStatus === 'setup';
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    // `autoFocus` focuses the field but Android often won't raise the keyboard while the screen is still
+    // mounting, so focus it once things have settled instead.
+    useEffect(() => {
+        const timer = setTimeout(() => pinRef.current?.focus(), 350);
+        return () => clearTimeout(timer);
+    }, [isSetup]);
+
+    const handleSubmit = async (pinValue = pin, confirmValue = confirmPin) => {
+        if (isBusy) return;
         setError('');
-        
-        if (pin.length !== 6 || !/^\d{6}$/.test(pin)) {
+
+        if (pinValue.length !== PIN_LENGTH || !/^\d{6}$/.test(pinValue)) {
             setError('PIN must be exactly 6 digits.');
+            haptics.error();
             return;
         }
 
-        if (isSetup) {
-            if (pin !== confirmPin) {
-                setError('PINs do not match.');
-                return;
+        setIsBusy(true);
+        try {
+            if (isSetup) {
+                if (pinValue !== confirmValue) {
+                    setError('PINs do not match.');
+                    haptics.error();
+                    return;
+                }
+                await setupVault(pinValue);
+                haptics.success();
+            } else {
+                const success = await unlockVault(pinValue);
+                if (!success) {
+                    setError('Incorrect PIN.');
+                    haptics.error();
+                    setPin('');
+                } else {
+                    haptics.success();
+                }
             }
-            await setupVault(pin);
-        } else {
-            const success = await unlockVault(pin);
-            if (!success) {
-                setError('Incorrect PIN.');
-                setPin('');
-            }
+        } finally {
+            setIsBusy(false);
         }
     };
 
+    const handlePinChange = (value: string) => {
+        setPin(value);
+        if (value.length === PIN_LENGTH) {
+            // The number pad has no return key on iOS, so move along automatically.
+            if (isSetup) confirmRef.current?.focus();
+            else handleSubmit(value);
+        }
+    };
+
+    const handleConfirmChange = (value: string) => {
+        setConfirmPin(value);
+        if (value.length === PIN_LENGTH && pin.length === PIN_LENGTH) handleSubmit(pin, value);
+    };
+
     const handleForgotPinReset = async () => {
-        const confirmed = window.confirm(
-            'WARNING: This will permanently delete all encrypted data and remove your PIN. This cannot be undone.\n\nDo you want to continue?'
+        const confirmed = await confirmAsync(
+            'Wipe My Data',
+            'WARNING: This will permanently delete all encrypted data and remove your PIN. This cannot be undone.\n\nDo you want to continue?',
+            { confirmText: 'Wipe Data', destructive: true }
         );
 
         if (!confirmed) {
@@ -46,64 +123,112 @@ export default function PinScreen() {
     };
 
     return (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-            <div className="card" style={{ width: '100%', maxWidth: '400px', textAlign: 'center', padding: '3rem 2rem', backgroundColor: '#22222230'}}>
-                <img src="/logos/white-svg.svg" alt="Billy Logo" style={{ height: '48px', marginBottom: '1.5rem' }} />
-                <h2 style={{ margin: '0 0 0.5rem 0' }}>{isSetup ? 'Create a Secure PIN' : 'Enter Your PIN'}</h2>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
-                    {isSetup 
-                        ? <>
-                            This 6-digit PIN will encrypt your data locally.<br />
-                            <strong>If you forget it, your data cannot be recovered.</strong>
-                          </>
-                        : 'Unlock your secure local vault.'}
-                </p>
-                
-                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-                    <div className="form-group" style={{ width: '100%', maxWidth: '250px', marginBottom: 0 }}>
-                        <input 
-                            type="password" 
-                            maxLength={6} 
-                            value={pin} 
-                            onChange={e => setPin(e.target.value.replace(/\D/g, ''))} 
-                            placeholder="••••••" 
-                            style={{ textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.5em', fontWeight: 'bold' }}
-                            required
-                        />
-                    </div>
+        <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[
+                styles.container,
+                { paddingTop: insets.top + 16, paddingBottom: Math.max(insets.bottom, keyboardHeight) + 16 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+        >
+            <Card style={styles.card}>
+                <View style={styles.logo}>
+                    <Logo size={48} />
+                </View>
+                <AppText variant="h2" center style={styles.title}>{isSetup ? 'Create a Secure PIN' : 'Enter Your PIN'}</AppText>
+                {isSetup ? (
+                    <AppText muted center style={styles.subtitle}>
+                        This 6-digit PIN will encrypt your data locally.{'\n'}
+                        <AppText muted bold>If you forget it, your data cannot be recovered.</AppText>
+                    </AppText>
+                ) : (
+                    <AppText muted center style={styles.subtitle}>Unlock your secure local vault.</AppText>
+                )}
+
+                <View style={styles.form}>
+                    <PinInput inputRef={pinRef} value={pin} onChangeText={handlePinChange} editable={!isBusy} />
 
                     {isSetup && (
-                        <div className="form-group" style={{ width: '100%', maxWidth: '250px', marginBottom: 0 }}>
-                            <input 
-                                type="password" 
-                                maxLength={6} 
-                                value={confirmPin} 
-                                onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))} 
-                                placeholder="••••••" 
-                                style={{ textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.5em', fontWeight: 'bold' }}
-                                required
-                            />
-                        </div>
+                        <PinInput inputRef={confirmRef} value={confirmPin} onChangeText={handleConfirmChange} editable={!isBusy} />
                     )}
 
-                    {error && <p style={{ color: 'var(--color-loss)', margin: 0, fontWeight: 'bold' }}>{error}</p>}
+                    {!!error && <AppText bold center color={colors.loss}>{error}</AppText>}
 
-                    <button type="submit" className="btn-standard" style={{ width: '100%', maxWidth: '250px', fontSize: '1.1rem', padding: '0.75rem', marginTop: '1rem' }}>
-                        {isSetup ? 'Set PIN' : 'Unlock Vault'}
-                    </button>
+                    <Button
+                        title={isBusy ? (isSetup ? 'Securing Vault…' : 'Unlocking…') : (isSetup ? 'Set PIN' : 'Unlock Vault')}
+                        onPress={() => handleSubmit()}
+                        loading={isBusy}
+                        style={styles.submit}
+                        textStyle={styles.submitText}
+                    />
 
                     {!isSetup && (
-                        <button
-                            type="button"
-                            className="btn-danger"
-                            onClick={handleForgotPinReset}
-                            style={{ width: '100%', maxWidth: '250px', marginTop: '0.5rem' }}
-                        >
-                            Wipe My Data (Forgot PIN)
-                        </button>
+                        <Button
+                            title="Wipe My Data (Forgot PIN)"
+                            variant="danger"
+                            onPress={handleForgotPinReset}
+                            disabled={isBusy}
+                            style={styles.wipe}
+                        />
                     )}
-                </form>
-            </div>
-        </div>
+                </View>
+            </Card>
+        </ScrollView>
     );
 }
+
+const styles = StyleSheet.create({
+    scroll: {
+        flex: 1,
+    },
+    container: {
+        flexGrow: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+    },
+    card: {
+        width: '100%',
+        maxWidth: 400,
+        alignItems: 'center',
+        paddingVertical: 40,
+        paddingHorizontal: 24,
+        backgroundColor: '#22222230',
+    },
+    logo: {
+        marginBottom: 24,
+    },
+    title: {
+        marginBottom: 8,
+    },
+    subtitle: {
+        marginBottom: 28,
+    },
+    form: {
+        width: '100%',
+        maxWidth: 250,
+        alignItems: 'stretch',
+        gap: 16,
+    },
+    pinInput: {
+        backgroundColor: colors.input,
+        borderRadius: radius.input,
+        color: colors.textMain,
+        fontFamily: fonts.bold,
+        fontSize: 24,
+        letterSpacing: 12,
+        textAlign: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 8,
+    },
+    submit: {
+        marginTop: 8,
+        paddingVertical: 12,
+    },
+    submitText: {
+        fontSize: 17,
+    },
+    wipe: {
+        marginTop: 0,
+    },
+});
