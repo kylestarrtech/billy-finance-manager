@@ -37,7 +37,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          # Pinned so CI's npm only changes when you choose. Use the same version locally: an older
+          # npm can write a package-lock.json that a newer `npm ci` rejects as out of sync.
+          node-version: 24.20.0
           cache: npm
 
       - name: Install dependencies
