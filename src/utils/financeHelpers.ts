@@ -1,32 +1,12 @@
-import { type Bill, type Income, PaymentFrequency } from '../context/FinanceContext';
-import { parseISODate, startOfToday } from './dates';
+import { type Bill, type VaultData } from '../types';
+import { budgetMonthly } from './budgets';
+import { addMonthsClamped, daysBetween, parseISODate, startOfToday } from './dates';
+import { pickPaycheckIncome } from './payPeriod';
+import { DAY_STEPS, MONTH_STEPS, isIncomeActive, normalizeToMonthly } from './schedule';
 
-export const normalizeToMonthly = (amount: number, frequency: PaymentFrequency): number => {
-    switch (frequency) {
-        case PaymentFrequency.Daily:
-            return (amount * 365) / 12;
-        case PaymentFrequency.Weekly:
-            return (amount * 52) / 12;
-        case PaymentFrequency.Biweekly:
-            return (amount * 26) / 12;
-        case PaymentFrequency.Monthly:
-            return amount;
-        case PaymentFrequency.Bimonthly:
-            return (amount * 6) / 12;
-        case PaymentFrequency.Quarterly:
-            return (amount * 4) / 12;
-        case PaymentFrequency.Semiannually:
-            return (amount * 2) / 12;
-        case PaymentFrequency.Annually:
-            return amount / 12;
-        case PaymentFrequency.Onetime:
-            return 0;
-        default:
-            return 0;
-    }
-};
+export { normalizeToMonthly } from './schedule';
 
-export const getFrequencyBreakdown = (amount: number, frequency: PaymentFrequency) => {
+export const getFrequencyBreakdown = (amount: number, frequency: Bill['frequency']) => {
     const monthly = normalizeToMonthly(amount, frequency);
     const yearly = monthly * 12;
     return {
@@ -40,20 +20,26 @@ export const getFrequencyBreakdown = (amount: number, frequency: PaymentFrequenc
     };
 };
 
-export const getSummaryStats = (bills: Bill[], incomes: Income[]) => {
+export const getSummaryStats = (data: Pick<VaultData, 'bills' | 'incomes' | 'budgets' | 'cards' | 'settings'>, today: Date = startOfToday()) => {
+    const sum = (values: number[]) => values.reduce((total, v) => total + v, 0);
 
-    const totalMonthlyIncome = incomes.reduce((total, income) => {
-        return total + normalizeToMonthly(income.amount, income.frequency);
-    }, 0);
+    // Income that has already ended no longer counts toward the monthly picture.
+    const totalMonthlyIncome = sum(
+        data.incomes.filter(income => isIncomeActive(income, today)).map(income => normalizeToMonthly(income.amount, income.frequency))
+    );
 
-    const totalMonthlyExpenses = bills.reduce((total, bill) => {
-        return total + normalizeToMonthly(bill.cost, bill.frequency);
-    }, 0);
+    const billsMonthly = sum(data.bills.map(bill => normalizeToMonthly(bill.cost, bill.frequency)));
+    const essentialBills = sum(data.bills.filter(bill => bill.isEssential).map(bill => normalizeToMonthly(bill.cost, bill.frequency)));
 
-    const essentialExpenses =
-        bills.filter((bill) => bill.isEssential).reduce((total, bill) => {
-            return total + normalizeToMonthly(bill.cost, bill.frequency);
-        }, 0);
+    const paycheckFrequency = pickPaycheckIncome(data.incomes, data.settings.payPeriodIncomeId, today)?.frequency;
+    const budgetsMonthly = sum(data.budgets.map(budget => budgetMonthly(budget, paycheckFrequency)));
+    const essentialBudgets = sum(data.budgets.filter(b => b.isEssential).map(budget => budgetMonthly(budget, paycheckFrequency)));
+
+    const cardsMonthly = sum(data.cards.filter(card => card.balance > 0).map(card => card.plannedPayment));
+
+    const totalMonthlyExpenses = billsMonthly + budgetsMonthly + cardsMonthly;
+    const essentialExpenses = essentialBills + essentialBudgets;
+    const nonEssentialExpenses = (billsMonthly - essentialBills) + (budgetsMonthly - essentialBudgets);
 
     const leftoverCash = totalMonthlyIncome - totalMonthlyExpenses;
 
@@ -66,43 +52,17 @@ export const getSummaryStats = (bills: Bill[], incomes: Income[]) => {
     return {
         totalMonthlyIncome,
         totalMonthlyExpenses,
+        billsMonthly,
+        budgetsMonthly,
+        cardsMonthly,
         essentialExpenses,
+        nonEssentialExpenses,
         leftoverCash,
         dailyIncome,
         weeklyIncome,
         dailyExpenses,
         weeklyExpenses
     }
-};
-
-const DAY_STEPS: Partial<Record<PaymentFrequency, number>> = {
-    [PaymentFrequency.Daily]: 1,
-    [PaymentFrequency.Weekly]: 7,
-    [PaymentFrequency.Biweekly]: 14,
-};
-
-const MONTH_STEPS: Partial<Record<PaymentFrequency, number>> = {
-    [PaymentFrequency.Monthly]: 1,
-    [PaymentFrequency.Bimonthly]: 2,
-    [PaymentFrequency.Quarterly]: 3,
-    [PaymentFrequency.Semiannually]: 6,
-    [PaymentFrequency.Annually]: 12,
-};
-
-// Whole calendar days between two local dates, immune to DST shifts.
-const daysBetween = (from: Date, to: Date) =>
-    Math.round(
-        (Date.UTC(to.getFullYear(), to.getMonth(), to.getDate()) -
-            Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86_400_000
-    );
-
-// Adds months while clamping to the end of shorter months, so a bill due on the 31st stays
-// "end of month" instead of drifting (Jan 31 -> Feb 28 -> Mar 31, not Jan 31 -> Mar 3 -> Apr 3).
-const addMonthsClamped = (date: Date, months: number) => {
-    const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
-    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-    target.setDate(Math.min(date.getDate(), lastDay));
-    return target;
 };
 
 export const getNextPaymentDetails = (bill: Bill) => {
@@ -136,22 +96,5 @@ export const getNextPaymentDetails = (bill: Bill) => {
         }
     }
 
-    let paymentsLeft = 0;
-    let remainingBalance = 0;
-    if (bill.isFinanced && bill.totalLoanAmount) {
-        remainingBalance = Math.max(0, bill.totalLoanAmount - (bill.cost * paymentsMade));
-        paymentsLeft = bill.cost > 0 ? Math.ceil(remainingBalance / bill.cost) : 0;
-    }
-
-    return { nextDate, paymentsMade, remainingBalance, paymentsLeft, isComplete };
-};
-
-export const getUpcomingBills = (bills: Bill[]): { bill: Bill; nextDate: Date }[] => {
-    const upcoming = bills
-        .map(bill => ({ bill, details: getNextPaymentDetails(bill) }))
-        // filter out one-time bills that have already been paid
-        .filter(u => !u.details.isComplete)
-        .map(u => ({ bill: u.bill, nextDate: u.details.nextDate }));
-
-    return upcoming.sort((a, b) => a.nextDate.getTime() - b.nextDate.getTime()).slice(0, 5);
+    return { nextDate, paymentsMade, isComplete };
 };

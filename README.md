@@ -32,10 +32,29 @@ Scan the QR code with **Expo Go** (Android) or the Camera app (iOS). Your phone 
 2. Download the `.ipa` from the release, or from the run's **Artifacts** section (that download is a zip containing the `.ipa`).
 3. On Windows, install Sideloadly plus the **non-Microsoft-Store** versions of iTunes and iCloud. Connect the iPhone, drop the `.ipa` in, and sign in with your Apple ID.
 4. On the iPhone:
-   - Trust your Apple ID under Settings → General → VPN & Device Management.
-   - Turn on Settings → Privacy & Security → Developer Mode (iOS 16+).
+   - Trust your Apple ID under Settings > General > VPN & Device Management.
+   - Turn on Settings > Privacy & Security > Developer Mode (iOS 16+).
 
 Free Apple ID signatures expire after **7 days**. Sideloadly's auto-refresh re-signs the app before then, or you can install the `.ipa` again. Reinstalling over the app keeps its data. Deleting the app deletes the vault, so keep a JSON export as a backup.
+
+## Features
+
+- **Dashboard:** pay-period budget ("left to spend until payday"), upcoming and overdue bills with one-tap *Paid*, monthly income and expenses, 50/30/20 split, and cash-flow pies.
+- **Bills tab:** four sections, switched from a bar pinned above the tab bar.
+  - **Bills:** fixed bills with paid tracking and the actual amount paid.
+  - **Budgets:** variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left.
+  - **Cards:** credit card balances with payoff dates, interest and utilization.
+  - **Loans:** car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends.
+- **Income tab → Savings Goals:** set a goal (price, sales tax, optional date). Billy works out what's safe to save: income minus bills, budgets and debt payments, minus a 20% cushion. It shows that amount per paycheck, when you'll have the goal, and whether a target date is realistic.
+- **Context-aware + button:** offers the add action for the current screen. On the Dashboard and Calendar it opens a small menu.
+- **Dashboard credit utilization:** current vs. target (under 30%, ideally 10%), how much to pay down, and per-card figures. Loans don't count, matching how credit scores treat installment debt.
+- **Calendar:** month view of due dates, paydays and spending. Each state has its own shape as well as colour (● paid, ○ due, ■ overdue), so it reads without relying on red/green. Tap a day to see or pay what's on it.
+- **Settings:**
+  - Face ID / fingerprint unlock.
+  - Bill reminders, as local notifications: no server involved.
+  - Which paycheck defines the pay period.
+  - Import, export and delete data.
+  - Privacy statement.
 
 ## Project layout
 
@@ -43,16 +62,29 @@ Navigation uses [Expo Router](https://docs.expo.dev/router/introduction/) with t
 
 ```
 src/app/_layout.tsx          root: fonts/splash, auto-lock, app-switcher privacy, lock screen vs. tabs
-src/app/unlock.tsx           PIN setup / unlock (shown whenever the vault is locked)
-src/app/(tabs)/_layout.tsx   native bottom tabs + blurred header, floating + Bill / + Income, add/edit modals
-src/app/(tabs)/*.tsx         one file per tab (index = Dashboard, bills, income, privacy)
-src/components/              screens: Dashboard, Bills, Income, PrivacyScreen, PinScreen, AddBill, AddIncome
+src/app/unlock.tsx           PIN / biometric unlock (shown whenever the vault is locked)
+src/app/(tabs)/_layout.tsx   native bottom tabs + blurred header, floating + buttons, all add/edit modals
+src/app/(tabs)/*.tsx         one file per tab (index = Dashboard, bills, income, calendar, settings)
+src/components/              screens and modals (Dashboard, SpendingTab, CalendarView, SettingsScreen, Add*, ...)
 src/components/ui/           building blocks: AppText, Button, Card, ModalShell, FormControls, PieChart, ...
-src/context/                 FinanceContext (vault, data, export/import), EditorContext, TabChromeContext
-src/utils/                   cryptoWrapper + pbkdf2 (vault encryption), storageAdapter, financeHelpers, dates
-assets/                      Noto Serif fonts, logos, app icon/splash images
+src/context/                 FinanceContext (vault data + actions), EditorContext, TabChromeContext
+src/types.ts                 the vault's data model
+src/utils/schedule.ts        expands bills, card payments and paychecks into dated occurrences
+src/utils/                   payPeriod, budgets, cards, reminders, notifications, biometrics, crypto, storage
+plugins/                     config plugin that drops the push entitlement (Billy only uses local notifications)
+assets/                      Noto Serif fonts, logos, app icon/splash/notification images
 ```
 
 ## Storage and encryption
 
 The vault is `billy_secure_vault.json` in the app's private documents directory. It's AES-256-GCM encrypted with a key derived from your 6-digit PIN (PBKDF2-SHA256, 100k iterations), using the same byte format as the desktop version. The key is derived once when you unlock (about 2–3 seconds) and kept in memory until the app locks, either on restart or after 2 minutes in the background (`AUTO_LOCK_AFTER_MS` in `src/app/_layout.tsx`).
+
+With biometric unlock on, a copy of that derived key is stored in the iOS Keychain / Android Keystore. The OS only releases it after Face ID or a fingerprint, and it never leaves the device or syncs. Unlocking with it skips the PIN step. If your enrolled biometrics change, the OS invalidates the key and Billy falls back to the PIN.
+
+Desktop exports (bills and income only) still import. Bills marked "financed" in older data move to Loans automatically, keeping their payment history. Anything they don't contain, like budgets, cards and payment history, is kept.
+
+## Expo Go limitations
+
+Everything runs in Expo Go except:
+- **Face ID** needs the installed app on iOS. Fingerprint works in Expo Go on Android.
+- **The custom "Bill reminders" notification channel** on Android: Expo Go falls back to its default channel.

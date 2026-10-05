@@ -1,72 +1,55 @@
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
-import { File } from 'expo-file-system';
-import { useFinance } from '../context/FinanceContext';
-import { getSummaryStats, getUpcomingBills, normalizeToMonthly } from '../utils/financeHelpers';
-import { formatDate } from '../utils/dates';
-import { confirmAsync, showAlert } from '../utils/dialogs';
+import { isLoan, useFinance } from '../context/FinanceContext';
+import { useEditor } from '../context/EditorContext';
+import { getSummaryStats, normalizeToMonthly } from '../utils/financeHelpers';
+import { budgetMonthly } from '../utils/budgets';
+import { pickPaycheckIncome } from '../utils/payPeriod';
+import { getDueItems, getUpcomingDue, isIncomeActive } from '../utils/schedule';
+import { endOfMonth, formatDate, formatMoney, startOfToday } from '../utils/dates';
 import { colors, fonts } from '../theme';
 import AppText from './ui/AppText';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import PieChart from './ui/PieChart';
+import PayPeriodCard from './PayPeriodCard';
+import UtilizationCard from './UtilizationCard';
+import GoalsSummaryCard from './GoalsSummaryCard';
 
 const WIDE_LAYOUT = 700;
 
 export default function Dashboard() {
-    const { bills, incomes, exportData, importData, clearAllData } = useFinance();
+    const { data, bills, incomes, budgets, cards } = useFinance();
+    const { openPaymentSheet } = useEditor();
     const { width } = useWindowDimensions();
     const isWide = width >= WIDE_LAYOUT;
+    const today = startOfToday();
 
-    const handleImportFile = async () => {
-        // expo-file-system's own picker grants read access to the chosen file (Expo Go's sandbox
-        // refuses to read files handed over by other modules). Cloud providers often report JSON as
-        // octet-stream, so any file is allowed and validated when parsed.
-        const picked = await File.pickFileAsync({ mimeTypes: '*/*' });
-        if (picked.canceled) return;
-
-        const confirmed = await confirmAsync(
-            'Import Data',
-            'WARNING: Importing data will OVERWRITE all your current bills and income data. Do you wish to proceed?',
-            { confirmText: 'Overwrite', destructive: true }
-        );
-        if (!confirmed) return;
-
-        try {
-            importData(await picked.result.text());
-        } catch (error) {
-            console.warn('Import read failed:', error);
-            showAlert('Import Failed', 'Could not read the selected file.');
-        }
-    };
-
-    const stats = getSummaryStats(bills, incomes);
-    const upcoming = getUpcomingBills(bills);
+    const stats = getSummaryStats(data, today);
+    const upcoming = getUpcomingDue(data, today, 5);
+    const stillDueThisMonth = getDueItems(data, today, endOfMonth(today), today).filter(item => !item.payment);
+    const stillDueTotal = stillDueThisMonth.reduce((sum, item) => sum + item.amount, 0);
 
     const isNetPositive = stats.leftoverCash >= 0;
 
-    const incomeData = incomes.map(inc => ({
+    const incomeData = incomes.filter(inc => isIncomeActive(inc, today)).map(inc => ({
         name: inc.name,
         value: normalizeToMonthly(inc.amount, inc.frequency)
     }));
 
-    const expenseData = bills.map(b => ({
-        name: b.name,
-        value: normalizeToMonthly(b.cost, b.frequency)
-    }));
+    const paycheckFrequency = pickPaycheckIncome(incomes, data.settings.payPeriodIncomeId, today)?.frequency;
+    const expenseData = [
+        ...bills.map(b => ({ name: b.name, value: normalizeToMonthly(b.cost, b.frequency) })),
+        ...budgets.map(b => ({ name: `${b.name} (budget)`, value: budgetMonthly(b, paycheckFrequency) })),
+        ...cards.filter(c => c.balance > 0).map(c => ({ name: `${c.name} (${isLoan(c) ? 'loan' : 'card'})`, value: c.plannedPayment })),
+    ];
 
-    const hasData = bills.length > 0 || incomes.length > 0;
+    const hasData = bills.length > 0 || incomes.length > 0 || budgets.length > 0 || cards.length > 0;
 
-    const handleDeleteAllData = async () => {
-        const confirmed = await confirmAsync(
-            'Delete All Data',
-            'WARNING: This will permanently delete all bills, income, and your PIN-protected vault data. This cannot be undone.\n\nDo you want to continue?',
-            { confirmText: 'Delete Everything', destructive: true }
-        );
-
-        if (!confirmed) return;
-
-        await clearAllData();
-    };
+    const expenseParts = [
+        stats.billsMonthly > 0 && `Bills ${formatMoney(stats.billsMonthly)}`,
+        stats.budgetsMonthly > 0 && `Budgets ${formatMoney(stats.budgetsMonthly)}`,
+        stats.cardsMonthly > 0 && `Debt ${formatMoney(stats.cardsMonthly)}`,
+    ].filter(Boolean);
 
     const rowStyle = isWide ? styles.row : styles.column;
 
@@ -77,29 +60,39 @@ export default function Dashboard() {
                 <Card style={styles.welcome}>
                     <AppText variant="h2" center style={styles.welcomeTitle}>Welcome to Billy Bill Manager!</AppText>
                     <AppText muted center>
-                        To get started and activate your dashboard metrics, please add your first income source or bill using the + Bill and + Income buttons.
+                        To get started and activate your dashboard metrics, please add your first income source or bill using the + Add button.
                     </AppText>
                 </Card>
             )}
 
             {hasData && (
                 <>
-                {/* Top: Upcoming Expenses */}
+                <PayPeriodCard />
+
+                <GoalsSummaryCard />
+
+                {/* Upcoming Expenses */}
                 <Card>
                     <AppText variant="h2" style={styles.cardTitle}>Upcoming Expenses</AppText>
                     {upcoming.length === 0 ? (
-                        <AppText muted>No upcoming bills.</AppText>
+                        <AppText muted>Nothing waiting to be paid.</AppText>
                     ) : (
                         <View style={styles.upcomingList}>
-                            {upcoming.map((u) => (
-                                <Card key={u.bill.id} style={styles.upcomingCard}>
-                                    <AppText variant="h4" style={styles.upcomingName}>{u.bill.name}</AppText>
-                                    <AppText bold>${u.bill.cost.toFixed(2)}</AppText>
-                                    <AppText variant="small" muted style={styles.upcomingDue}>
-                                        Due: {formatDate(u.nextDate)}
-                                    </AppText>
-                                </Card>
-                            ))}
+                            {upcoming.map(item => {
+                                const overdue = item.date < today;
+                                return (
+                                    <Card key={item.key} style={[styles.upcomingCard, overdue && styles.overdueCard]}>
+                                        <View style={styles.upcomingText}>
+                                            <AppText variant="h4" style={styles.upcomingName}>{item.name}</AppText>
+                                            <AppText bold>{formatMoney(item.amount)}</AppText>
+                                            <AppText variant="small" muted={!overdue} color={overdue ? colors.loss : undefined} style={styles.upcomingDue}>
+                                                {`${overdue ? 'Overdue' : 'Due'}: ${formatDate(item.date)}${item.kind === 'card' ? (item.isLoan ? ' · loan payment' : ' · card payment') : ''}`}
+                                            </AppText>
+                                        </View>
+                                        <Button title="✓ Paid" small variant="secondary" onPress={() => openPaymentSheet(item)} />
+                                    </Card>
+                                );
+                            })}
                         </View>
                     )}
                 </Card>
@@ -109,39 +102,48 @@ export default function Dashboard() {
                     <Card style={isWide && styles.flexCell}>
                         <AppText variant="h3">Monthly Income</AppText>
                         <AppText style={styles.bigNumber} color={colors.gain} adjustsFontSizeToFit numberOfLines={1}>
-                            ${stats.totalMonthlyIncome.toFixed(2)}
+                            {formatMoney(stats.totalMonthlyIncome)}
                         </AppText>
                         <AppText muted>
-                            Weekly Avg: ${stats.weeklyIncome.toFixed(2)}
+                            Weekly Avg: {formatMoney(stats.weeklyIncome)}
                         </AppText>
                         <AppText muted>
-                            Daily Avg: ${stats.dailyIncome.toFixed(2)}
+                            Daily Avg: {formatMoney(stats.dailyIncome)}
                         </AppText>
                     </Card>
 
                     <Card style={isWide && styles.flexCell}>
                         <AppText variant="h3">Monthly Expenses</AppText>
                         <AppText style={styles.bigNumber} color={colors.loss} adjustsFontSizeToFit numberOfLines={1}>
-                            ${stats.totalMonthlyExpenses.toFixed(2)}
+                            {formatMoney(stats.totalMonthlyExpenses)}
+                        </AppText>
+                        {expenseParts.length > 1 && (
+                            <AppText variant="small" muted style={styles.parts}>{expenseParts.join(' · ')}</AppText>
+                        )}
+                        <AppText muted>
+                            Weekly Avg: {formatMoney(stats.weeklyExpenses)}
                         </AppText>
                         <AppText muted>
-                            Weekly Avg: ${stats.weeklyExpenses.toFixed(2)}
+                            Daily Avg: {formatMoney(stats.dailyExpenses)}
                         </AppText>
-                        <AppText muted>
-                            Daily Avg: ${stats.dailyExpenses.toFixed(2)}
+                        <AppText style={styles.stillDue}>
+                            <AppText bold>{formatMoney(stillDueTotal)}</AppText>
+                            <AppText muted>{` still due this month (${stillDueThisMonth.length} unpaid)`}</AppText>
                         </AppText>
                     </Card>
 
                     <Card tone={isNetPositive ? 'gain' : 'loss'} style={isWide && styles.flexCell}>
                         <AppText variant="h3">Remaining</AppText>
                         <AppText style={styles.bigNumber} color={isNetPositive ? colors.gain : colors.loss} adjustsFontSizeToFit numberOfLines={1}>
-                            {isNetPositive ? '+' : '-'}${Math.abs(stats.leftoverCash).toFixed(2)}
+                            {isNetPositive ? '+' : '-'}{formatMoney(Math.abs(stats.leftoverCash))}
                         </AppText>
                         <AppText muted>
                             {isNetPositive ? 'You are cash-positive this month.' : 'You are spending more than you earn!'}
                         </AppText>
                     </Card>
                 </View>
+
+                <UtilizationCard />
 
                 {/* Bottom: Charts & Recommendations */}
                 <View style={rowStyle}>
@@ -153,20 +155,23 @@ export default function Dashboard() {
 
                         <View style={styles.recommendation}>
                             <AppText variant="h4" style={styles.recommendationTitle}>Needs (50%)</AppText>
-                            <AppText muted>Recommended: ${(stats.totalMonthlyIncome * 0.50).toFixed(2)}</AppText>
-                            <AppText muted>Actual Essential: ${(stats.essentialExpenses).toFixed(2)}</AppText>
+                            <AppText muted>Recommended: {formatMoney(stats.totalMonthlyIncome * 0.50)}</AppText>
+                            <AppText muted>Actual Essential: {formatMoney(stats.essentialExpenses)}</AppText>
                         </View>
 
                         <View style={styles.recommendation}>
                             <AppText variant="h4" style={styles.recommendationTitle}>Wants (30%)</AppText>
-                            <AppText muted>Recommended Limit: ${(stats.totalMonthlyIncome * 0.30).toFixed(2)}</AppText>
-                            <AppText muted>Actual Non-essential: ${(stats.totalMonthlyExpenses - stats.essentialExpenses).toFixed(2)}</AppText>
+                            <AppText muted>Recommended Limit: {formatMoney(stats.totalMonthlyIncome * 0.30)}</AppText>
+                            <AppText muted>Actual Non-essential: {formatMoney(stats.nonEssentialExpenses)}</AppText>
                         </View>
 
                         <View>
-                            <AppText variant="h4" style={styles.recommendationTitle}>Savings/Investing (20%)</AppText>
-                            <AppText muted>Recommended Goal: ${(stats.totalMonthlyIncome * 0.20).toFixed(2)}</AppText>
-                            <AppText muted>Actual Leftover: ${(stats.leftoverCash).toFixed(2)}</AppText>
+                            <AppText variant="h4" style={styles.recommendationTitle}>Savings & Debt (20%)</AppText>
+                            <AppText muted>Recommended Goal: {formatMoney(stats.totalMonthlyIncome * 0.20)}</AppText>
+                            <AppText muted>Actual Leftover: {formatMoney(stats.leftoverCash)}</AppText>
+                            {stats.cardsMonthly > 0 && (
+                                <AppText muted>Debt Payments: {formatMoney(stats.cardsMonthly)}</AppText>
+                            )}
                         </View>
                     </Card>
 
@@ -182,16 +187,6 @@ export default function Dashboard() {
                 </View>
                 </>
             )}
-
-            <View style={styles.dataActions}>
-                <Button title="Import Data from JSON" onPress={handleImportFile} />
-                <Button title="Export Data to JSON" onPress={exportData} />
-            </View>
-
-            <View style={styles.dangerZone}>
-                <Button title="Delete All Data" variant="danger" onPress={handleDeleteAllData} />
-            </View>
-
         </View>
     );
 }
@@ -217,6 +212,16 @@ const styles = StyleSheet.create({
     upcomingCard: {
         padding: 16,
         backgroundColor: colors.cardInner,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    overdueCard: {
+        borderWidth: 1,
+        borderColor: 'rgba(229, 57, 53, 0.4)',
+    },
+    upcomingText: {
+        flex: 1,
     },
     upcomingName: {
         marginBottom: 6,
@@ -240,6 +245,12 @@ const styles = StyleSheet.create({
         fontFamily: fonts.bold,
         marginVertical: 6,
     },
+    parts: {
+        marginBottom: 6,
+    },
+    stillDue: {
+        marginTop: 10,
+    },
     recommendationIntro: {
         marginTop: 4,
         marginBottom: 20,
@@ -254,15 +265,5 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 16,
-    },
-    dataActions: {
-        paddingTop: 16,
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        gap: 12,
-    },
-    dangerZone: {
-        alignItems: 'center',
     },
 });

@@ -2,62 +2,88 @@ import { createContext, useContext, useState, useEffect, type ReactNode, useRef,
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { randomUUID } from 'expo-crypto';
+import {
+    EMPTY_VAULT,
+    type AppSettings,
+    type Bill,
+    type Budget,
+    type CreditCard,
+    type GoalContribution,
+    type Income,
+    type SavingsGoal,
+    type Payment,
+    type SpendingEntry,
+    type VaultData,
+} from '../types';
 import { storageAdapter } from '../utils/storageAdapter';
-import { encryptWithKey, decryptVault, deriveVaultKey, type VaultKey } from '../utils/cryptoWrapper';
+import { encryptWithKey, decryptVault, decryptVaultWithKey, deriveVaultKey, type VaultKey } from '../utils/cryptoWrapper';
 import { confirmAsync, showAlert } from '../utils/dialogs';
+import {
+    disableBiometricUnlock,
+    enableBiometricUnlock,
+    getBiometricSupport,
+    getVaultKeyWithBiometrics,
+    isBiometricUnlockEnabled,
+    type BiometricSupport,
+} from '../utils/biometrics';
+import { buildReminderPlan } from '../utils/reminders';
+import { cancelAllReminders, hasReminderPermission, scheduleReminders } from '../utils/notifications';
+import { dueKey } from '../utils/schedule';
+import { loadVaultData } from '../utils/migrate';
 
-export const PaymentFrequency = {
-    Daily: 'daily',
-    Weekly: 'weekly',
-    Biweekly: 'biweekly',
-    Monthly: 'monthly',
-    Bimonthly: 'bimonthly',
-    Quarterly: 'quarterly',
-    Semiannually: 'semiannually',
-    Annually: 'annually',
-    Onetime: 'onetime'
-} as const;
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare -- value + type pair, used like an enum
-export type PaymentFrequency = typeof PaymentFrequency[keyof typeof PaymentFrequency];
-
-export interface Bill {
-    id: string;
-    name: string;
-    cost: number;
-    frequency: PaymentFrequency;
-    firstPaymentDate: string;
-    isEssential: boolean;
-    note?: string;
-    isFinanced: boolean;
-    totalLoanAmount?: number;
-    loanTermMonths?: number;
-}
-
-export interface Income {
-    id: string;
-    name: string;
-    amount: number;
-    frequency: PaymentFrequency;
-    initialPaymentDate: string;
-    endingPaymentDate?: string; // im adding this just in case someone has short-term contract work
-}
+export * from '../types';
 
 export type AuthStatus = 'loading' | 'setup' | 'locked' | 'unlocked';
 
+/** Identifies one scheduled occurrence of a bill or card payment. */
+export interface DueRef {
+    kind: Payment['kind'];
+    itemId: string;
+    dueDate: string;
+}
+
 interface FinanceContextType {
+    data: VaultData;
     bills: Bill[];
     incomes: Income[];
+    payments: Payment[];
+    budgets: Budget[];
+    spending: SpendingEntry[];
+    cards: CreditCard[];
+    goals: SavingsGoal[];
+    contributions: GoalContribution[];
+    settings: AppSettings;
     authStatus: AuthStatus;
     unlockVault: (pin: string) => Promise<boolean>;
     setupVault: (pin: string) => Promise<void>;
     lockVault: () => void;
+    biometricSupport: BiometricSupport | null;
+    biometricEnabled: boolean;
+    setBiometricUnlock: (enabled: boolean) => Promise<boolean>;
+    unlockWithBiometrics: () => Promise<'ok' | 'cancelled' | 'unavailable'>;
     addBill: (bill: Omit<Bill, 'id'>) => void;
     editBill: (id: string, updatedBill: Omit<Bill, 'id'>) => void;
     deleteBill: (id: string) => void;
     addIncome: (income: Omit<Income, 'id'>) => void;
     editIncome: (id: string, updatedIncome: Omit<Income, 'id'>) => void;
     deleteIncome: (id: string) => void;
+    addBudget: (budget: Omit<Budget, 'id'>) => void;
+    editBudget: (id: string, budget: Omit<Budget, 'id'>) => void;
+    deleteBudget: (id: string) => void;
+    addSpending: (entry: Omit<SpendingEntry, 'id'>) => void;
+    deleteSpending: (id: string) => void;
+    addGoal: (goal: Omit<SavingsGoal, 'id'>) => void;
+    editGoal: (id: string, goal: Omit<SavingsGoal, 'id'>) => void;
+    deleteGoal: (id: string) => void;
+    addContribution: (entry: Omit<GoalContribution, 'id'>) => void;
+    deleteContribution: (id: string) => void;
+    addCard: (card: Omit<CreditCard, 'id'>) => void;
+    editCard: (id: string, card: Omit<CreditCard, 'id'>) => void;
+    deleteCard: (id: string) => void;
+    /** Records (or updates) a payment for one due occurrence. Card payments reduce the card's balance. */
+    markPaid: (due: DueRef, amount: number, paidDate: string) => void;
+    unmarkPaid: (paymentId: string) => void;
+    updateSettings: (update: (settings: AppSettings) => AppSettings) => void;
     exportData: () => Promise<void>;
     importData: (jsonData: string) => void;
     clearAllData: () => Promise<void>;
@@ -79,15 +105,18 @@ const removeExportFile = () => {
     }
 };
 
+type ListKey = 'bills' | 'incomes' | 'budgets' | 'spending' | 'cards' | 'payments' | 'goals' | 'contributions';
+
 export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
-    const [bills, setBills] = useState<Bill[]>([]);
-    const [incomes, setIncomes] = useState<Income[]>([]);
+    const [data, setData] = useState<VaultData>(EMPTY_VAULT);
+    const [biometricSupport, setBiometricSupport] = useState<BiometricSupport | null>(null);
+    const [biometricEnabled, setBiometricEnabled] = useState(false);
     const vaultKeyRef = useRef<VaultKey | null>(null);
     // Saves are chained so writes always land in order, even if state changes in quick succession.
     const saveChainRef = useRef<Promise<void>>(Promise.resolve());
 
-    const persist = useCallback((payload: { bills: Bill[]; incomes: Income[] }) => {
+    const persist = useCallback((payload: VaultData) => {
         const vaultKey = vaultKeyRef.current;
         if (!vaultKey) return saveChainRef.current;
         saveChainRef.current = saveChainRef.current
@@ -100,6 +129,9 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     useEffect(() => {
         const init = async () => {
             removeExportFile();
+            const [support, enabled] = await Promise.all([getBiometricSupport(), isBiometricUnlockEnabled()]);
+            setBiometricSupport(support);
+            setBiometricEnabled(enabled && support.available);
             try {
                 const vault = await storageAdapter.get();
                 if (vault) {
@@ -116,73 +148,186 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         init();
     }, []);
 
+    const openVault = (plaintext: string, vaultKey: VaultKey) => {
+        const parsed = loadVaultData(JSON.parse(plaintext));
+        vaultKeyRef.current = vaultKey;
+        setData(parsed);
+        setAuthStatus('unlocked');
+    };
+
     const unlockVault = async (pin: string): Promise<boolean> => {
         const vault = await storageAdapter.get();
         if (!vault) return false;
         try {
-            const { data, vaultKey } = await decryptVault(vault, pin);
-            const parsed = JSON.parse(data);
-            vaultKeyRef.current = vaultKey;
-            setBills(parsed.bills || []);
-            setIncomes(parsed.incomes || []);
-            setAuthStatus('unlocked');
+            const { data: plaintext, vaultKey } = await decryptVault(vault, pin);
+            openVault(plaintext, vaultKey);
             return true;
         } catch {
             return false;
         }
     };
 
+    const unlockWithBiometrics = async (): Promise<'ok' | 'cancelled' | 'unavailable'> => {
+        const result = await getVaultKeyWithBiometrics();
+        if (result.status === 'cancelled') return 'cancelled';
+        const vault = await storageAdapter.get();
+        if (result.status === 'ok' && vault) {
+            try {
+                openVault(decryptVaultWithKey(vault, result.vaultKey), result.vaultKey);
+                return 'ok';
+            } catch {
+                // Key from an older vault (wiped and set up again); fall through and turn it off.
+            }
+        }
+        await disableBiometricUnlock();
+        setBiometricEnabled(false);
+        return 'unavailable';
+    };
+
     const setupVault = async (pin: string) => {
         vaultKeyRef.current = await deriveVaultKey(pin);
         // immediately trigger a save so the vault is actually created
-        await persist({ bills, incomes });
+        await persist(data);
         setAuthStatus('unlocked');
     };
 
-    // Drops the decrypted data and key from memory; the PIN is needed again to get back in.
+    // Drops the decrypted data and key from memory; the PIN (or biometrics) is needed again to get back in.
     const lockVault = useCallback(() => {
         vaultKeyRef.current = null;
         removeExportFile();
-        setBills([]);
-        setIncomes([]);
+        setData(EMPTY_VAULT);
         setAuthStatus(status => (status === 'unlocked' ? 'locked' : status));
     }, []);
+
+    const setBiometricUnlock = async (enabled: boolean): Promise<boolean> => {
+        if (!enabled) {
+            await disableBiometricUnlock();
+            setBiometricEnabled(false);
+            return true;
+        }
+        const vaultKey = vaultKeyRef.current;
+        if (!vaultKey || !biometricSupport?.available) return false;
+        const ok = await enableBiometricUnlock(vaultKey, biometricSupport.label);
+        setBiometricEnabled(ok);
+        return ok;
+    };
 
     // autosave
     useEffect(() => {
         if (authStatus === 'unlocked') {
-            persist({ bills, incomes });
+            persist(data);
         }
-    }, [bills, incomes, authStatus, persist]);
+    }, [data, authStatus, persist]);
 
-    const addBill = (bill: Omit<Bill, 'id'>) => {
-        const newBill = { ...bill, id: randomUUID() };
-        setBills(prev => [...prev, newBill]);
+    // Keep the scheduled bill reminders in step with the data (debounced so a burst of edits reschedules once).
+    useEffect(() => {
+        if (authStatus !== 'unlocked') return;
+        const timer = setTimeout(async () => {
+            try {
+                if (!data.settings.reminders.enabled) {
+                    await cancelAllReminders();
+                } else if (await hasReminderPermission()) {
+                    await scheduleReminders(buildReminderPlan(data, data.settings.reminders, new Date()));
+                }
+            } catch (e) {
+                console.warn('Could not update bill reminders:', e);
+            }
+        }, 1500);
+        return () => clearTimeout(timer);
+    }, [data, authStatus]);
+
+    const addTo = <K extends ListKey>(key: K, item: Omit<VaultData[K][number], 'id'>) => {
+        setData(d => ({ ...d, [key]: [...d[key], { ...item, id: randomUUID() }] }));
     };
 
-    const editBill = (id: string, updatedBill: Omit<Bill, 'id'>) => {
-        setBills(prev => prev.map(
-            bill => bill.id === id ? { ...updatedBill, id } : bill
-        ));
+    const replaceIn = <K extends ListKey>(key: K, id: string, item: Omit<VaultData[K][number], 'id'>) => {
+        setData(d => ({ ...d, [key]: (d[key] as { id: string }[]).map(existing => (existing.id === id ? { ...item, id } : existing)) }));
     };
 
+    const addBill = (bill: Omit<Bill, 'id'>) => addTo('bills', bill);
+    const editBill = (id: string, updatedBill: Omit<Bill, 'id'>) => replaceIn('bills', id, updatedBill);
     const deleteBill = (id: string) => {
-        setBills(prev => prev.filter(bill => bill.id !== id));
+        setData(d => ({
+            ...d,
+            bills: d.bills.filter(bill => bill.id !== id),
+            payments: d.payments.filter(p => !(p.kind === 'bill' && p.itemId === id)),
+        }));
     };
 
-    const addIncome = (income: Omit<Income, 'id'>) => {
-        const newIncome = { ...income, id: randomUUID() };
-        setIncomes(prev => [...prev, newIncome]);
-    };
-
-    const editIncome = (id: string, updatedIncome: Omit<Income, 'id'>) => {
-        setIncomes(prev => prev.map(
-            income => income.id === id ? { ...updatedIncome, id } : income
-        ))
-    };
-
+    const addIncome = (income: Omit<Income, 'id'>) => addTo('incomes', income);
+    const editIncome = (id: string, updatedIncome: Omit<Income, 'id'>) => replaceIn('incomes', id, updatedIncome);
     const deleteIncome = (id: string) => {
-        setIncomes(prev => prev.filter(income => income.id !== id));
+        setData(d => ({
+            ...d,
+            incomes: d.incomes.filter(income => income.id !== id),
+            settings: d.settings.payPeriodIncomeId === id ? { ...d.settings, payPeriodIncomeId: undefined } : d.settings,
+        }));
+    };
+
+    const addBudget = (budget: Omit<Budget, 'id'>) => addTo('budgets', budget);
+    const editBudget = (id: string, budget: Omit<Budget, 'id'>) => replaceIn('budgets', id, budget);
+    const deleteBudget = (id: string) => {
+        setData(d => ({
+            ...d,
+            budgets: d.budgets.filter(b => b.id !== id),
+            spending: d.spending.filter(e => e.budgetId !== id),
+        }));
+    };
+
+    const addSpending = (entry: Omit<SpendingEntry, 'id'>) => addTo('spending', entry);
+    const deleteSpending = (id: string) => setData(d => ({ ...d, spending: d.spending.filter(e => e.id !== id) }));
+
+    const addGoal = (goal: Omit<SavingsGoal, 'id'>) => addTo('goals', goal);
+    const editGoal = (id: string, goal: Omit<SavingsGoal, 'id'>) => replaceIn('goals', id, goal);
+    const deleteGoal = (id: string) => {
+        setData(d => ({
+            ...d,
+            goals: d.goals.filter(g => g.id !== id),
+            contributions: d.contributions.filter(c => c.goalId !== id),
+        }));
+    };
+
+    const addContribution = (entry: Omit<GoalContribution, 'id'>) => addTo('contributions', entry);
+    const deleteContribution = (id: string) => setData(d => ({ ...d, contributions: d.contributions.filter(c => c.id !== id) }));
+
+    const addCard = (card: Omit<CreditCard, 'id'>) => addTo('cards', card);
+    const editCard = (id: string, card: Omit<CreditCard, 'id'>) => replaceIn('cards', id, card);
+    const deleteCard = (id: string) => {
+        setData(d => ({
+            ...d,
+            cards: d.cards.filter(c => c.id !== id),
+            payments: d.payments.filter(p => !(p.kind === 'card' && p.itemId === id)),
+        }));
+    };
+
+    const adjustCardBalance = (cards: CreditCard[], cardId: string, paidDelta: number) =>
+        cards.map(c => (c.id === cardId ? { ...c, balance: Math.max(0, Math.round((c.balance - paidDelta) * 100) / 100) } : c));
+
+    const markPaid = (due: DueRef, amount: number, paidDate: string) => {
+        setData(d => {
+            const key = dueKey(due.kind, due.itemId, due.dueDate);
+            const existing = d.payments.find(p => dueKey(p.kind, p.itemId, p.dueDate) === key);
+            const payment: Payment = { id: existing?.id ?? randomUUID(), ...due, paidDate, amount };
+            const payments = existing ? d.payments.map(p => (p.id === existing.id ? payment : p)) : [...d.payments, payment];
+            const cards = due.kind === 'card' ? adjustCardBalance(d.cards, due.itemId, amount - (existing?.amount ?? 0)) : d.cards;
+            return { ...d, payments, cards };
+        });
+    };
+
+    const unmarkPaid = (paymentId: string) => {
+        setData(d => {
+            const payment = d.payments.find(p => p.id === paymentId);
+            if (!payment) return d;
+            return {
+                ...d,
+                payments: d.payments.filter(p => p.id !== paymentId),
+                cards: payment.kind === 'card' ? adjustCardBalance(d.cards, payment.itemId, -payment.amount) : d.cards,
+            };
+        });
+    };
+
+    const updateSettings = (update: (settings: AppSettings) => AppSettings) => {
+        setData(d => ({ ...d, settings: update(d.settings) }));
     };
 
     const exportData = async () => {
@@ -202,7 +347,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             const file = new File(Paths.cache, EXPORT_FILE_NAME);
             if (file.exists) file.delete();
             file.create();
-            file.write(JSON.stringify({ bills, incomes }, null, 2));
+            file.write(JSON.stringify(data, null, 2));
             await Sharing.shareAsync(file.uri, {
                 mimeType: 'application/json',
                 UTI: 'public.json',
@@ -222,8 +367,31 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         try {
             const parsed = JSON.parse(jsonData);
             if (Array.isArray(parsed.bills) && Array.isArray(parsed.incomes)) {
-                setBills(parsed.bills);
-                setIncomes(parsed.incomes);
+                // Desktop exports only contain bills and incomes; keep everything else they don't include.
+                setData(current => {
+                    const imported = loadVaultData(parsed);
+                    const pick = <K extends ListKey>(key: K) => (Array.isArray(parsed[key]) ? imported[key] : current[key]);
+                    const bills = imported.bills;
+                    // Without a cards list, imported.cards holds only loans migrated from financed bills.
+                    const cards = Array.isArray(parsed.cards) ? imported.cards : [...current.cards, ...imported.cards];
+                    const budgets = pick('budgets');
+                    const goals = pick('goals');
+                    const billIds = new Set(bills.map(b => b.id));
+                    const cardIds = new Set(cards.map(c => c.id));
+                    const budgetIds = new Set(budgets.map(b => b.id));
+                    const goalIds = new Set(goals.map(g => g.id));
+                    return {
+                        bills,
+                        incomes: imported.incomes,
+                        cards,
+                        budgets,
+                        goals,
+                        payments: pick('payments').filter(p => (p.kind === 'bill' ? billIds : cardIds).has(p.itemId)),
+                        spending: pick('spending').filter(e => budgetIds.has(e.budgetId)),
+                        contributions: pick('contributions').filter(c => goalIds.has(c.goalId)),
+                        settings: parsed.settings ? imported.settings : current.settings,
+                    };
+                });
                 showAlert('Import Complete', 'Data successfully imported!');
             } else {
                 showAlert('Import Failed', 'Invalid data structure in JSON file.');
@@ -237,26 +405,56 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         vaultKeyRef.current = null;
         await saveChainRef.current;
         await storageAdapter.clear();
+        await disableBiometricUnlock();
+        await cancelAllReminders().catch(() => {});
+        setBiometricEnabled(false);
         removeExportFile();
-        setBills([]);
-        setIncomes([]);
+        setData(EMPTY_VAULT);
         setAuthStatus('setup');
     };
 
     return (
         <FinanceContext.Provider value={{
-            bills,
-            incomes,
+            data,
+            bills: data.bills,
+            incomes: data.incomes,
+            payments: data.payments,
+            budgets: data.budgets,
+            spending: data.spending,
+            cards: data.cards,
+            goals: data.goals,
+            contributions: data.contributions,
+            settings: data.settings,
             authStatus,
             unlockVault,
             setupVault,
             lockVault,
+            biometricSupport,
+            biometricEnabled,
+            setBiometricUnlock,
+            unlockWithBiometrics,
             addBill,
             editBill,
             deleteBill,
             addIncome,
             editIncome,
             deleteIncome,
+            addBudget,
+            editBudget,
+            deleteBudget,
+            addSpending,
+            deleteSpending,
+            addGoal,
+            editGoal,
+            deleteGoal,
+            addContribution,
+            deleteContribution,
+            addCard,
+            editCard,
+            deleteCard,
+            markPaid,
+            unmarkPaid,
+            updateSettings,
             exportData,
             importData,
             clearAllData

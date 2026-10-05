@@ -24,20 +24,12 @@ export default function AddBill({ onClose, billToEdit }: AddBillProps) {
     const [firstPaymentDate, setFirstPaymentDate] = useState(billToEdit?.firstPaymentDate || '');
     const [isEssential, setIsEssential] = useState(billToEdit?.isEssential ?? true);
     const [note, setNote] = useState(billToEdit?.note || '');
-    const [isFinanced, setIsFinanced] = useState(billToEdit?.isFinanced ?? false);
-    const [totalLoanAmount, setTotalLoanAmount] = useState(billToEdit?.totalLoanAmount !== undefined ? String(billToEdit.totalLoanAmount) : '');
-    const [loanTermMonths, setLoanTermMonths] = useState(billToEdit?.loanTermMonths !== undefined ? String(billToEdit.loanTermMonths) : '');
     const [error, setError] = useState('');
 
     const handleSubmit = () => {
         // Stand-ins for the `required` attributes on the web form.
         if (!name.trim() || cost === '' || isNaN(Number(cost)) || !firstPaymentDate) {
             setError('Please fill in the name, cost and first payment date.');
-            haptics.error();
-            return;
-        }
-        if (isFinanced && (!totalLoanAmount || !loanTermMonths)) {
-            setError('Financed bills need a total loan amount and loan term.');
             haptics.error();
             return;
         }
@@ -49,9 +41,6 @@ export default function AddBill({ onClose, billToEdit }: AddBillProps) {
             firstPaymentDate,
             isEssential,
             ...(note ? { note } : {}),
-            isFinanced,
-            ...(isFinanced && totalLoanAmount ? { totalLoanAmount: Number(totalLoanAmount) } : {}),
-            ...(isFinanced && loanTermMonths ? { loanTermMonths: Number(loanTermMonths) } : {})
         };
 
         if (billToEdit) {
@@ -88,18 +77,6 @@ export default function AddBill({ onClose, billToEdit }: AddBillProps) {
             </FormField>
 
             <SwitchRow label="Is Essential" value={isEssential} onValueChange={setIsEssential} />
-            <SwitchRow label="Is Financed" value={isFinanced} onValueChange={setIsFinanced} />
-
-            {isFinanced && (
-                <>
-                    <FormField label="Total Loan Amount">
-                        <NumberField value={totalLoanAmount} onChangeText={setTotalLoanAmount} placeholder="0.00" />
-                    </FormField>
-                    <FormField label="Loan Term (Months)">
-                        <NumberField value={loanTermMonths} onChangeText={setLoanTermMonths} decimal={false} placeholder="12" />
-                    </FormField>
-                </>
-            )}
 
             <FormField label="Note (Optional)">
                 <TextField value={note} onChangeText={setNote} />

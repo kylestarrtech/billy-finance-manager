@@ -89,3 +89,27 @@ export const decryptVault = async (base64Payload: string, pin: string): Promise<
     const decrypted = gcm(vaultKey.key, iv).decrypt(ciphertext);
     return { data: utf8Decode(decrypted), vaultKey };
 };
+
+/**
+ * Decrypts a vault payload with an already-derived key (biometric unlock), skipping PBKDF2. Throws if the
+ * key belongs to a different vault (salt mismatch, e.g. after a wipe and new PIN) or doesn't decrypt it.
+ */
+export const decryptVaultWithKey = (base64Payload: string, vaultKey: VaultKey): string => {
+    const payload = fromBase64(base64Payload);
+    const salt = payload.slice(0, SALT_LENGTH);
+    if (salt.length !== vaultKey.salt.length || salt.some((byte, i) => byte !== vaultKey.salt[i])) {
+        throw new Error('Stored key belongs to a different vault');
+    }
+    const iv = payload.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+    const ciphertext = payload.slice(SALT_LENGTH + IV_LENGTH);
+    return utf8Decode(gcm(vaultKey.key, iv).decrypt(ciphertext));
+};
+
+/** Compact string form of a vault key, for the biometric-protected keychain/keystore entry. */
+export const serializeVaultKey = (vaultKey: VaultKey): string =>
+    JSON.stringify({ k: toBase64(vaultKey.key), s: toBase64(vaultKey.salt) });
+
+export const deserializeVaultKey = (value: string): VaultKey => {
+    const parsed = JSON.parse(value) as { k: string; s: string };
+    return { key: fromBase64(parsed.k), salt: fromBase64(parsed.s) };
+};

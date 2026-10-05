@@ -1,10 +1,10 @@
 import TabScreen from '../../components/TabScreen';
-import PrivacyScreen from '../../components/PrivacyScreen';
+import SettingsScreen from '../../components/SettingsScreen';
 
-export default function PrivacyScreenRoute() {
+export default function SettingsRoute() {
   return (
     <TabScreen>
-      <PrivacyScreen />
+      <SettingsScreen />
     </TabScreen>
   );
 }
