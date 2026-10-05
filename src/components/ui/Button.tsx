@@ -20,6 +20,7 @@ export function ScalePressable({
     onPress,
     disabled,
     style,
+    containerStyle,
     pressedScale = 0.95,
     children,
     accessibilityLabel,
@@ -27,6 +28,8 @@ export function ScalePressable({
     onPress?: () => void;
     disabled?: boolean;
     style?: StyleProp<ViewStyle>;
+    /** Style for the outer touch target, e.g. `flex: 1` so `style` can fill a sized parent. */
+    containerStyle?: StyleProp<ViewStyle>;
     pressedScale?: number;
     children: ReactNode;
     accessibilityLabel?: string;
@@ -45,6 +48,7 @@ export function ScalePressable({
             accessibilityLabel={accessibilityLabel}
             accessibilityState={{ disabled: !!disabled }}
             hitSlop={4}
+            style={containerStyle}
         >
             <Animated.View style={[style, { transform: [{ scale }] }, disabled && styles.disabled]}>
                 {children}

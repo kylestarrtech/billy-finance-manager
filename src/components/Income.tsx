@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { useFinance, type Income as IncomeType } from '../context/FinanceContext';
 import { useEditor } from '../context/EditorContext';
 import { getFrequencyBreakdown, normalizeToMonthly } from '../utils/financeHelpers';
-import { formatISODate } from '../utils/dates';
+import { formatISODate, formatMoney } from '../utils/dates';
 import { confirmAsync } from '../utils/dialogs';
 import { haptics } from '../utils/haptics';
 import AppText from './ui/AppText';
@@ -54,8 +54,8 @@ export default function Income() {
                             <View>
                                 <AppText variant="h3" style={styles.name}>{income.name}</AppText>
                                 <AppText muted>
-                                    ${income.amount.toFixed(2)} / {income.frequency}
-                                    <AppText variant="small" muted>{`   (~$${breakdown.monthly.toFixed(2)}/mo)`}</AppText>
+                                    {formatMoney(income.amount)} / {income.frequency}
+                                    <AppText variant="small" muted>{`   (~${formatMoney(breakdown.monthly)}/mo)`}</AppText>
                                 </AppText>
                                 {!!income.endingPaymentDate && (
                                     <AppText variant="small" italic style={styles.detail}>Ends on: {formatISODate(income.endingPaymentDate)}</AppText>

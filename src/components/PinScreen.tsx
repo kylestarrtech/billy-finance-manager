@@ -40,7 +40,7 @@ function PinInput({ inputRef, value, onChangeText, editable }: {
 }
 
 export default function PinScreen() {
-    const { authStatus, unlockVault, setupVault, clearAllData } = useFinance();
+    const { authStatus, unlockVault, setupVault, clearAllData, biometricEnabled, biometricSupport, unlockWithBiometrics } = useFinance();
     const insets = useSafeAreaInsets();
     const keyboardHeight = useKeyboardHeight();
     const [pin, setPin] = useState('');
@@ -51,13 +51,43 @@ export default function PinScreen() {
     const confirmRef = useRef<TextInput>(null);
 
     const isSetup = authStatus === 'setup';
+    const canUseBiometrics = !isSetup && biometricEnabled;
+    const biometricLabel = biometricSupport?.label ?? 'Face ID';
 
+    const focusPin = () => setTimeout(() => pinRef.current?.focus(), 350);
+
+    const tryBiometrics = async () => {
+        if (isBusy) return;
+        setError('');
+        setIsBusy(true);
+        try {
+            const result = await unlockWithBiometrics();
+            if (result === 'ok') {
+                haptics.success();
+                return;
+            }
+            if (result === 'unavailable') {
+                setError(`${biometricLabel} unlock was turned off (your ${biometricLabel} settings may have changed). Use your PIN, then turn it back on in Settings.`);
+            }
+            focusPin();
+        } finally {
+            setIsBusy(false);
+        }
+    };
+
+    // Offer biometrics straight away when it's on; otherwise (or after cancelling) focus the PIN field.
     // `autoFocus` focuses the field but Android often won't raise the keyboard while the screen is still
     // mounting, so focus it once things have settled instead.
     useEffect(() => {
-        const timer = setTimeout(() => pinRef.current?.focus(), 350);
+        if (canUseBiometrics) {
+            const timer = setTimeout(tryBiometrics, 300);
+            return () => clearTimeout(timer);
+        }
+        const timer = focusPin();
         return () => clearTimeout(timer);
-    }, [isSetup]);
+        // Only on first show / when the mode changes, not on every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSetup, canUseBiometrics]);
 
     const handleSubmit = async (pinValue = pin, confirmValue = confirmPin) => {
         if (isBusy) return;
@@ -161,6 +191,14 @@ export default function PinScreen() {
                         style={styles.submit}
                         textStyle={styles.submitText}
                     />
+
+                    {canUseBiometrics && (
+                        <Button
+                            title={`Unlock with ${biometricLabel}`}
+                            onPress={tryBiometrics}
+                            disabled={isBusy}
+                        />
+                    )}
 
                     {!isSetup && (
                         <Button

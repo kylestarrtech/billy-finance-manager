@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, G, Path } from 'react-native-svg';
 import AppText from './AppText';
 import { CHART_COLORS, colors } from '../../theme';
+import { formatMoney } from '../../utils/dates';
 
 export interface PieDatum {
     name: string;
@@ -125,7 +126,7 @@ export default function PieChart({ title, data, radius = 80 }: PieChartProps) {
                         <View style={[styles.swatch, { backgroundColor: active.color }]} />
                         <AppText variant="small" numberOfLines={1} style={styles.tooltipText}>
                             <AppText variant="small" bold color={active.color}>{active.name}</AppText>
-                            {`: $${active.value.toFixed(2)}  (${(active.share * 100).toFixed(1)}%)`}
+                            {`: ${formatMoney(active.value)}  (${(active.share * 100).toFixed(1)}%)`}
                         </AppText>
                     </View>
                 ) : (

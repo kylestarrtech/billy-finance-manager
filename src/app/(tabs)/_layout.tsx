@@ -5,17 +5,30 @@ import { BlurTargetView } from 'expo-blur';
 
 import AddBill from '../../components/AddBill';
 import AddIncome from '../../components/AddIncome';
+import AddBudget from '../../components/AddBudget';
+import AddCard from '../../components/AddCard';
+import AddSpending from '../../components/AddSpending';
+import AddGoal from '../../components/AddGoal';
+import AddContribution from '../../components/AddContribution';
+import PaymentSheet from '../../components/PaymentSheet';
 import AppHeader from '../../components/AppHeader';
 import FloatingActions from '../../components/FloatingActions';
 import { BlurTargetContext } from '../../components/ui/Blur';
 import { EditorContext, type EditorContextType } from '../../context/EditorContext';
-import { TabChromeContext, type TabChromeContextType } from '../../context/TabChromeContext';
-import type { Bill, Income } from '../../context/FinanceContext';
+import { TabChromeContext, type FloatingAction, type TabChromeContextType } from '../../context/TabChromeContext';
+import type { Bill, Budget, CreditCard, DebtKind, Income, SavingsGoal } from '../../context/FinanceContext';
+import type { DueItem } from '../../utils/schedule';
 import { colors } from '../../theme';
 
 type EditorState =
   | { kind: 'bill'; bill?: Bill }
   | { kind: 'income'; income?: Income }
+  | { kind: 'budget'; budget?: Budget }
+  | { kind: 'card'; card?: CreditCard; debtKind?: DebtKind }
+  | { kind: 'spending'; budgetId?: string }
+  | { kind: 'payment'; due: DueItem }
+  | { kind: 'goal'; goal?: SavingsGoal }
+  | { kind: 'contribution'; goalId: string; suggested?: number }
   | null;
 
 // iOS 26 draws the tab bar in Liquid Glass and picks colours from the content behind it, so only the
@@ -40,6 +53,7 @@ const tabBarStyle = Platform.select({
 
 export default function TabsLayout() {
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [floatingActions, setFloatingActionsState] = useState<FloatingAction[]>([]);
   const [tabBarTop, setTabBarTop] = useState<number | null>(null);
   const [rootBottom, setRootBottom] = useState<number | null>(null);
   const rootRef = useRef<View>(null);
@@ -51,13 +65,27 @@ export default function TabsLayout() {
   const editorContext = useMemo<EditorContextType>(() => ({
     openBillEditor: bill => setEditor({ kind: 'bill', bill }),
     openIncomeEditor: income => setEditor({ kind: 'income', income }),
+    openBudgetEditor: budget => setEditor({ kind: 'budget', budget }),
+    openCardEditor: (card, debtKind) => setEditor({ kind: 'card', card, debtKind }),
+    openSpendingEditor: budgetId => setEditor({ kind: 'spending', budgetId }),
+    openPaymentSheet: due => setEditor({ kind: 'payment', due }),
+    openGoalEditor: goal => setEditor({ kind: 'goal', goal }),
+    openContributionEditor: (goalId, suggested) => setEditor({ kind: 'contribution', goalId, suggested }),
   }), []);
+
+  // Screens re-send their actions on every render; only store them when the buttons actually change.
+  const setFloatingActions = useCallback((actions: FloatingAction[]) => {
+    setFloatingActionsState(prev =>
+      prev.map(a => a.label).join('|') === actions.map(a => a.label).join('|') ? prev : actions
+    );
+  }, []);
   const closeEditor = useCallback(() => setEditor(null), []);
 
   const tabChrome = useMemo<TabChromeContextType>(() => ({
     headerHeight,
     reportTabBarTop: setTabBarTop,
-  }), [headerHeight]);
+    setFloatingActions,
+  }), [headerHeight, setFloatingActions]);
 
   const handleRootLayout = () => {
     rootRef.current?.measureInWindow((_x, y, _w, h) => setRootBottom(y + h));
@@ -85,9 +113,13 @@ export default function TabsLayout() {
                   <NativeTabs.Trigger.Icon sf={{ default: 'banknote', selected: 'banknote.fill' }} md="payments" />
                   <NativeTabs.Trigger.Label>Income</NativeTabs.Trigger.Label>
                 </NativeTabs.Trigger>
-                <NativeTabs.Trigger name="privacy" disableAutomaticContentInsets contentStyle={styles.screen}>
-                  <NativeTabs.Trigger.Icon sf={{ default: 'lock.shield', selected: 'lock.shield.fill' }} md="shield_lock" />
-                  <NativeTabs.Trigger.Label>Privacy</NativeTabs.Trigger.Label>
+                <NativeTabs.Trigger name="calendar" disableAutomaticContentInsets contentStyle={styles.screen}>
+                  <NativeTabs.Trigger.Icon sf="calendar" md="calendar_month" />
+                  <NativeTabs.Trigger.Label>Calendar</NativeTabs.Trigger.Label>
+                </NativeTabs.Trigger>
+                <NativeTabs.Trigger name="settings" disableAutomaticContentInsets contentStyle={styles.screen}>
+                  <NativeTabs.Trigger.Icon sf={{ default: 'gearshape', selected: 'gearshape.fill' }} md="settings" />
+                  <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
                 </NativeTabs.Trigger>
               </NativeTabs>
             </BlurTargetView>
@@ -95,11 +127,7 @@ export default function TabsLayout() {
             <AppHeader onLayout={e => setHeaderHeight(e.nativeEvent.layout.height)} />
 
             {tabBarOffset != null && (
-              <FloatingActions
-                bottomOffset={tabBarOffset}
-                onAddBill={() => editorContext.openBillEditor()}
-                onAddIncome={() => editorContext.openIncomeEditor()}
-              />
+              <FloatingActions bottomOffset={tabBarOffset} actions={floatingActions} />
             )}
 
             {editor?.kind === 'bill' && (
@@ -108,6 +136,30 @@ export default function TabsLayout() {
 
             {editor?.kind === 'income' && (
               <AddIncome incomeToEdit={editor.income} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'budget' && (
+              <AddBudget budgetToEdit={editor.budget} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'card' && (
+              <AddCard cardToEdit={editor.card} kind={editor.debtKind} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'spending' && (
+              <AddSpending budgetId={editor.budgetId} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'payment' && (
+              <PaymentSheet due={editor.due} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'goal' && (
+              <AddGoal goalToEdit={editor.goal} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'contribution' && (
+              <AddContribution goalId={editor.goalId} suggested={editor.suggested} onClose={closeEditor} />
             )}
           </View>
         </BlurTargetContext.Provider>

@@ -2,6 +2,7 @@ import { StyleSheet, View } from 'react-native';
 import AppText from './AppText';
 import { colors } from '../../theme';
 import type { getFrequencyBreakdown } from '../../utils/financeHelpers';
+import { formatMoney } from '../../utils/dates';
 
 type Breakdown = ReturnType<typeof getFrequencyBreakdown>;
 
@@ -26,7 +27,7 @@ export default function BreakdownGrid({ breakdown }: { breakdown: Breakdown }) {
                         <AppText variant="caption" muted bold numberOfLines={1} adjustsFontSizeToFit>{label}</AppText>
                     </View>
                     <View style={styles.value}>
-                        <AppText variant="small" numberOfLines={1} adjustsFontSizeToFit>${breakdown[key].toFixed(2)}</AppText>
+                        <AppText variant="small" numberOfLines={1} adjustsFontSizeToFit>{formatMoney(breakdown[key])}</AppText>
                     </View>
                 </View>
             ))}

@@ -4,7 +4,7 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import AppText from './AppText';
 import Button, { ScalePressable } from './Button';
 import { colors, fonts, radius } from '../../theme';
-import { formatISODate, parseISODate, toISODate } from '../../utils/dates';
+import { formatISODate, formatTime, parseISODate, toISODate } from '../../utils/dates';
 import { haptics } from '../../utils/haptics';
 
 // `.form-group` + label
@@ -83,18 +83,69 @@ export function ChipSelect<T extends string>({
 }
 
 // Replaces the checkbox + label rows.
-export function SwitchRow({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (v: boolean) => void }) {
+export function SwitchRow({ label, description, value, onValueChange, disabled }: {
+    label: string;
+    description?: string;
+    value: boolean;
+    onValueChange: (v: boolean) => void;
+    disabled?: boolean;
+}) {
     return (
-        <Pressable style={[styles.group, styles.switchRow]} onPress={() => onValueChange(!value)} accessibilityRole="switch" accessibilityState={{ checked: value }}>
-            <AppText>{label}</AppText>
+        <Pressable
+            style={[styles.group, styles.switchRow, disabled && styles.disabled]}
+            onPress={() => !disabled && onValueChange(!value)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: value, disabled: !!disabled }}
+        >
+            <View style={styles.switchText}>
+                <AppText>{label}</AppText>
+                {!!description && <AppText variant="small" muted>{description}</AppText>}
+            </View>
             <Switch
                 value={value}
                 onValueChange={onValueChange}
+                disabled={disabled}
                 trackColor={{ false: colors.border, true: colors.gain }}
                 thumbColor={colors.textMain}
                 ios_backgroundColor={colors.border}
             />
         </Pressable>
+    );
+}
+
+// Time of day picker (hour/minute), e.g. when reminders go off.
+export function TimeField({ hour, minute, onChange }: { hour: number; minute: number; onChange: (hour: number, minute: number) => void }) {
+    const [iosPickerOpen, setIosPickerOpen] = useState(false);
+    const current = new Date(2000, 0, 1, hour, minute);
+
+    const open = () => {
+        if (Platform.OS === 'android') {
+            DateTimePickerAndroid.open({
+                value: current,
+                mode: 'time',
+                onValueChange: (_event, date) => onChange(date.getHours(), date.getMinutes()),
+            });
+        } else {
+            setIosPickerOpen(o => !o);
+        }
+    };
+
+    return (
+        <View>
+            <Pressable style={[styles.input, styles.dateInput]} onPress={open} accessibilityRole="button" accessibilityLabel={formatTime(hour, minute)}>
+                <AppText>{formatTime(hour, minute)}</AppText>
+            </Pressable>
+            {Platform.OS === 'ios' && iosPickerOpen && (
+                <DateTimePicker
+                    value={current}
+                    mode="time"
+                    display="spinner"
+                    themeVariant="dark"
+                    onValueChange={(_event, date) => onChange(date.getHours(), date.getMinutes())}
+                    style={styles.iosPicker}
+                />
+            )}
+        </View>
     );
 }
 
@@ -193,6 +244,14 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        gap: 12,
+    },
+    switchText: {
+        flexShrink: 1,
+        gap: 2,
+    },
+    disabled: {
+        opacity: 0.5,
     },
     dateRow: {
         flexDirection: 'row',
