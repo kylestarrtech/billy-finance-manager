@@ -15,7 +15,7 @@ npm start          # starts Metro and prints a QR code
 
 Scan the QR code with **Expo Go** (Android) or the Camera app (iOS). Your phone and PC need to be on the same Wi-Fi; if that doesn't work, use `npx expo start --tunnel`.
 
-| Script | What it does |
+| Script | Description |
 | --- | --- |
 | `npm start` | Dev server (press `a` for an Android emulator, `r` to reload, `j` for the debugger) |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -39,26 +39,26 @@ Free Apple ID signatures expire after **7 days**. Sideloadly's auto-refresh re-s
 
 ## Features
 
-- **Dashboard:** pay-period budget ("left to spend until payday"), upcoming and overdue bills with one-tap *Paid*, monthly income and expenses, 50/30/20 split, and cash-flow pies.
-- **Bills tab:** four sections, switched from a bar pinned above the tab bar.
-  - **Bills:** fixed bills with paid tracking and the actual amount paid.
-  - **Budgets:** variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left.
-  - **Cards:** credit card balances with payoff dates, interest and utilization.
-  - **Loans:** car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends.
-- **Income tab → Savings Goals:** set a goal (price, sales tax, optional date). Billy works out what's safe to save: income minus bills, budgets and debt payments, minus a 20% cushion. It shows that amount per paycheck, when you'll have the goal, and whether a target date is realistic.
-- **Context-aware + button:** offers the add action for the current screen. On the Dashboard and Calendar it opens a small menu.
-- **Dashboard credit utilization:** current vs. target (under 30%, ideally 10%), how much to pay down, and per-card figures. Loans don't count, matching how credit scores treat installment debt.
-- **Calendar:** month view of due dates, paydays and spending. Each state has its own shape as well as colour (● paid, ○ due, ■ overdue), so it reads without relying on red/green. Tap a day to see or pay what's on it.
+- **Dashboard:** Pay-period budgets, upcoming and overdue bills, credit utilization monthly income and expenses, 50/30/20 split suggestions, and cash-flow charts.
+- **Bills tab:**
+  - **Bills:** Fixed bills with paid tracking and the actual amount paid.
+  - **Budgets:** Variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left.
+  - **Cards:** Credit card balances with payoff dates and interest.
+  - **Loans:** Car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends.
+- **Income tab:**
+  - **Income:** Set up income pay periods, defining either fixed income, salaries, and payment frequencies.
+  - **Savings Goals:** Set goals to save towards, including sales tax and a target date. Targeted savings goals are prioritized over non-targeted ones to ensure goals are met.
+- **Dashboard credit utilization:** Current vs. target (under 30%, ideally 10%), how much to pay down, and per-card figures.
+- **Calendar:** Monthly view of due dates, paydays and spending; tap a day to see or pay what's on it.
 - **Settings:**
-  - Face ID / fingerprint unlock.
-  - Bill reminders, as local notifications: no server involved.
+  - Biometric unlock.
+  - Bill reminders, as local notifications.
   - Which paycheck defines the pay period.
-  - Import, export and delete data.
-  - Privacy statement.
+  - Import, export and delete data (**Note: This exported data is unencrypted, Billy warns you of this as well.**)
 
 ## Project layout
 
-Navigation uses [Expo Router](https://docs.expo.dev/router/introduction/) with the platform's native tab bar (Liquid Glass on iOS 26, Material on Android).
+Navigation uses [Expo Router](https://docs.expo.dev/router/introduction/) with your platform's native tab bar (Liquid Glass on iOS 26, Material on Android).
 
 ```
 src/app/_layout.tsx          root: fonts/splash, auto-lock, app-switcher privacy, lock screen vs. tabs
