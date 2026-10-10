@@ -4,6 +4,19 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
-  }
+    "noFallthroughCasesInSwitch": true,
+    "types": ["jest"]
+  },
+  // Replaces the Expo base list (exclude isn't merged), adding the Jest setup files: they pull in a
+  // library's mock source, which isn't written to this project's strictness.
+  "exclude": [
+    "node_modules",
+    "babel.config.js",
+    "metro.config.js",
+    "jest.config.js",
+    "jest.setup.js",
+    "jest.global-setup.js",
+    "android",
+    "ios"
+  ]
 }

@@ -19,6 +19,7 @@ Scan the QR code with **Expo Go** (Android) or the Camera app (iOS). Your phone 
 | --- | --- |
 | `npm start` | Dev server (press `a` for an Android emulator, `r` to reload, `j` for the debugger) |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Jest unit and component tests (`npm test -- --watch` while working) |
 | `npm run lint` | ESLint via `expo lint` |
 | `npm run doctor` | Checks dependency versions against the Expo SDK |
 
@@ -71,6 +72,8 @@ src/context/                 FinanceContext (vault data + actions), EditorContex
 src/types.ts                 the vault's data model
 src/utils/schedule.ts        expands bills, card payments and paychecks into dated occurrences
 src/utils/                   payPeriod, budgets, cards, reminders, notifications, biometrics, crypto, storage
+src/**/__tests__/            Jest tests: date/schedule/money logic, vault encryption, FinanceContext, screens
+src/test-utils/              test helpers: stand-ins for device services, a vault-backed render, a fixed "today"
 plugins/                     config plugin that drops the push entitlement (Billy only uses local notifications)
 assets/                      Noto Serif fonts, logos, app icon/splash/notification images
 ```
