@@ -11,6 +11,8 @@ import AddSpending from '../../components/AddSpending';
 import AddGoal from '../../components/AddGoal';
 import AddContribution from '../../components/AddContribution';
 import PaymentSheet from '../../components/PaymentSheet';
+import AddCardTransaction from '../../components/AddCardTransaction';
+import ActualPaySheet from '../../components/ActualPaySheet';
 import AppHeader from '../../components/AppHeader';
 import FloatingActions from '../../components/FloatingActions';
 import { BlurTargetContext } from '../../components/ui/Blur';
@@ -27,6 +29,8 @@ type EditorState =
   | { kind: 'card'; card?: CreditCard; debtKind?: DebtKind }
   | { kind: 'spending'; budgetId?: string }
   | { kind: 'payment'; due: DueItem }
+  | { kind: 'cardTransaction'; cardId: string }
+  | { kind: 'actualPay'; incomeId: string; payDate?: string }
   | { kind: 'goal'; goal?: SavingsGoal }
   | { kind: 'contribution'; goalId: string; suggested?: number }
   | null;
@@ -69,6 +73,8 @@ export default function TabsLayout() {
     openCardEditor: (card, debtKind) => setEditor({ kind: 'card', card, debtKind }),
     openSpendingEditor: budgetId => setEditor({ kind: 'spending', budgetId }),
     openPaymentSheet: due => setEditor({ kind: 'payment', due }),
+    openCardTransactionEditor: cardId => setEditor({ kind: 'cardTransaction', cardId }),
+    openActualPaySheet: (incomeId, payDate) => setEditor({ kind: 'actualPay', incomeId, payDate }),
     openGoalEditor: goal => setEditor({ kind: 'goal', goal }),
     openContributionEditor: (goalId, suggested) => setEditor({ kind: 'contribution', goalId, suggested }),
   }), []);
@@ -152,6 +158,14 @@ export default function TabsLayout() {
 
             {editor?.kind === 'payment' && (
               <PaymentSheet due={editor.due} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'cardTransaction' && (
+              <AddCardTransaction cardId={editor.cardId} onClose={closeEditor} />
+            )}
+
+            {editor?.kind === 'actualPay' && (
+              <ActualPaySheet incomeId={editor.incomeId} payDate={editor.payDate} onClose={closeEditor} />
             )}
 
             {editor?.kind === 'goal' && (

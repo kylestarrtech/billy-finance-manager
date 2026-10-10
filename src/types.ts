@@ -41,6 +41,15 @@ export interface Income {
     endingPaymentDate?: string; // im adding this just in case someone has short-term contract work
 }
 
+/** What one paycheck actually came to (variable hours, overtime...), replacing the income's usual amount. */
+export interface IncomeActual {
+    id: string;
+    incomeId: string;
+    /** The scheduled payday this paycheck covers ('YYYY-MM-DD'). */
+    payDate: string;
+    amount: number;
+}
+
 /** A recorded payment for one occurrence of a bill or a credit card's monthly payment. */
 export interface Payment {
     id: string;
@@ -79,6 +88,8 @@ export interface SpendingEntry {
     amount: number;
     date: string;
     note?: string;
+    /** Credit card it was put on; the amount was added to that card's balance. */
+    cardId?: string;
 }
 
 export type DebtKind = 'card' | 'loan';
@@ -112,6 +123,20 @@ export interface CreditCard {
 }
 
 export const isLoan = (entry: Pick<CreditCard, 'kind'>): boolean => entry.kind === 'loan';
+
+/**
+ * A one-off change to a card or loan balance, outside the monthly schedule: an extra payment, or a
+ * charge (purchase, fee) on a card. Budget spending put on a card is a SpendingEntry with a cardId instead.
+ */
+export interface CardTransaction {
+    id: string;
+    cardId: string;
+    /** 'payment' lowers the balance, 'charge' raises it. */
+    type: 'payment' | 'charge';
+    amount: number;
+    date: string;
+    note?: string;
+}
 
 export interface ReminderSettings {
     enabled: boolean;
@@ -153,10 +178,12 @@ export interface GoalContribution {
 export interface VaultData {
     bills: Bill[];
     incomes: Income[];
+    incomeActuals: IncomeActual[];
     payments: Payment[];
     budgets: Budget[];
     spending: SpendingEntry[];
     cards: CreditCard[];
+    cardTransactions: CardTransaction[];
     goals: SavingsGoal[];
     contributions: GoalContribution[];
     settings: AppSettings;
@@ -169,10 +196,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const EMPTY_VAULT: VaultData = {
     bills: [],
     incomes: [],
+    incomeActuals: [],
     payments: [],
     budgets: [],
     spending: [],
     cards: [],
+    cardTransactions: [],
     goals: [],
     contributions: [],
     settings: DEFAULT_SETTINGS,
@@ -189,10 +218,12 @@ export function normalizeVaultData(raw: Partial<VaultData> | null | undefined): 
     return {
         bills: asArray<Bill>(raw?.bills),
         incomes: asArray<Income>(raw?.incomes),
+        incomeActuals: asArray<IncomeActual>(raw?.incomeActuals),
         payments: asArray<Payment>(raw?.payments),
         budgets: asArray<Budget>(raw?.budgets),
         spending: asArray<SpendingEntry>(raw?.spending),
         cards: asArray<CreditCard>(raw?.cards),
+        cardTransactions: asArray<CardTransaction>(raw?.cardTransactions),
         goals: asArray<SavingsGoal>(raw?.goals),
         contributions: asArray<GoalContribution>(raw?.contributions),
         settings: {

@@ -3,9 +3,11 @@ import { StyleSheet, View } from 'react-native';
 import { useFinance, type Income as IncomeType } from '../context/FinanceContext';
 import { useEditor } from '../context/EditorContext';
 import { getFrequencyBreakdown, normalizeToMonthly } from '../utils/financeHelpers';
-import { formatISODate, formatMoney } from '../utils/dates';
+import { formatISODate, formatMoney, formatShortDate, startOfToday, toISODate } from '../utils/dates';
+import { recentPaydays } from '../utils/schedule';
 import { confirmAsync } from '../utils/dialogs';
 import { haptics } from '../utils/haptics';
+import { colors } from '../theme';
 import AppText from './ui/AppText';
 import Button from './ui/Button';
 import Card from './ui/Card';
@@ -13,8 +15,9 @@ import BreakdownGrid from './ui/BreakdownGrid';
 import ListToolbar from './ui/ListToolbar';
 
 export default function Income() {
-    const { incomes, deleteIncome } = useFinance();
-    const { openIncomeEditor } = useEditor();
+    const { incomes, incomeActuals, deleteIncome } = useFinance();
+    const { openIncomeEditor, openActualPaySheet } = useEditor();
+    const today = startOfToday();
     const [searchQuery, setSearchQuery] = useState('');
     const [isCondensed, setIsCondensed] = useState(false);
 
@@ -49,6 +52,9 @@ export default function Income() {
             ) : (
                 sortedIncomes.map(income => {
                     const breakdown = getFrequencyBreakdown(income.amount, income.frequency);
+                    const paydays = recentPaydays(income, today);
+                    const lastPayday = paydays.find(d => d <= today);
+                    const lastActual = lastPayday && incomeActuals.find(a => a.incomeId === income.id && a.payDate === toISODate(lastPayday));
                     return (
                         <Card key={income.id} style={styles.card}>
                             <View>
@@ -60,11 +66,19 @@ export default function Income() {
                                 {!!income.endingPaymentDate && (
                                     <AppText variant="small" italic style={styles.detail}>Ends on: {formatISODate(income.endingPaymentDate)}</AppText>
                                 )}
+                                {lastPayday && lastActual && (
+                                    <AppText variant="small" color={colors.gain} style={styles.detail}>
+                                        {`✓ ${formatShortDate(lastPayday)} paycheck: ${formatMoney(lastActual.amount)} actual`}
+                                    </AppText>
+                                )}
                             </View>
 
                             {!isCondensed && <BreakdownGrid breakdown={breakdown} />}
 
                             <View style={styles.actions}>
+                                {paydays.length > 0 && (
+                                    <Button title="Actual Pay" variant="primary" small onPress={() => openActualPaySheet(income.id)} />
+                                )}
                                 <Button title="Edit" variant="secondary" small onPress={() => openIncomeEditor(income)} />
                                 <Button title="Delete" variant="danger" small onPress={() => handleDelete(income)} />
                             </View>
@@ -91,6 +105,7 @@ const styles = StyleSheet.create({
     },
     actions: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         justifyContent: 'flex-end',
         gap: 8,
     },

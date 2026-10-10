@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useFinance } from '../context/FinanceContext';
+import { isLoan, useFinance } from '../context/FinanceContext';
 import ModalShell from './ui/ModalShell';
 import Button from './ui/Button';
 import AppText from './ui/AppText';
@@ -9,12 +9,14 @@ import { colors } from '../theme';
 import { startOfToday, toISODate } from '../utils/dates';
 import { haptics } from '../utils/haptics';
 
-// Logs money spent against a budget ("$84.20 at Costco").
+// Logs money spent against a budget ("$84.20 at Costco"), optionally put on a credit card.
 export default function AddSpending({ onClose, budgetId }: { onClose: () => void; budgetId?: string }) {
-    const { budgets, addSpending } = useFinance();
+    const { budgets, cards, addSpending } = useFinance();
+    const creditCards = cards.filter(c => !isLoan(c));
     const [isClosing, setIsClosing] = useState(false);
     const [selected, setSelected] = useState(budgetId ?? budgets[0]?.id ?? '');
     const [amount, setAmount] = useState('');
+    const [cardId, setCardId] = useState('');
     const [date, setDate] = useState(toISODate(startOfToday()));
     const [note, setNote] = useState('');
     const [error, setError] = useState('');
@@ -25,7 +27,7 @@ export default function AddSpending({ onClose, budgetId }: { onClose: () => void
             haptics.error();
             return;
         }
-        addSpending({ budgetId: selected, amount: Number(amount), date, ...(note.trim() ? { note: note.trim() } : {}) });
+        addSpending({ budgetId: selected, amount: Number(amount), date, ...(note.trim() ? { note: note.trim() } : {}), ...(cardId ? { cardId } : {}) });
         haptics.success();
         setIsClosing(true);
     };
@@ -38,6 +40,21 @@ export default function AddSpending({ onClose, budgetId }: { onClose: () => void
             <FormField label="Amount">
                 <NumberField value={amount} onChangeText={setAmount} placeholder="0.00" autoFocus />
             </FormField>
+            {creditCards.length > 0 && (
+                <FormField label="Paid With">
+                    <ChipSelect
+                        options={['', ...creditCards.map(c => c.id)]}
+                        value={cardId}
+                        onChange={setCardId}
+                        getLabel={id => creditCards.find(c => c.id === id)?.name ?? 'Cash / Debit'}
+                    />
+                    {!!cardId && (
+                        <AppText variant="small" muted style={styles.hint}>
+                            {`Also adds it to ${creditCards.find(c => c.id === cardId)?.name}'s balance.`}
+                        </AppText>
+                    )}
+                </FormField>
+            )}
             <FormField label="Date">
                 <DateField value={date} onChange={setDate} />
             </FormField>
@@ -56,6 +73,9 @@ export default function AddSpending({ onClose, budgetId }: { onClose: () => void
 }
 
 const styles = StyleSheet.create({
+    hint: {
+        marginTop: 6,
+    },
     actions: {
         flexDirection: 'row',
         justifyContent: 'flex-end',

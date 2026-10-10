@@ -19,6 +19,7 @@ Scan the QR code with **Expo Go** (Android) or the Camera app (iOS). Your phone 
 | --- | --- |
 | `npm start` | Dev server (press `a` for an Android emulator, `r` to reload, `j` for the debugger) |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Jest unit and component tests (`npm test -- --watch` while working) |
 | `npm run lint` | ESLint via `expo lint` |
 | `npm run doctor` | Checks dependency versions against the Expo SDK |
 
@@ -42,11 +43,11 @@ Free Apple ID signatures expire after **7 days**. Sideloadly's auto-refresh re-s
 - **Dashboard:** Pay-period budgets, upcoming and overdue bills, credit utilization monthly income and expenses, 50/30/20 split suggestions, and cash-flow charts.
 - **Bills tab:**
   - **Bills:** Fixed bills with paid tracking and the actual amount paid.
-  - **Budgets:** Variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left.
-  - **Cards:** Credit card balances with payoff dates and interest.
-  - **Loans:** Car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends.
+  - **Budgets:** Variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left. Spending can be put on a credit card, which adds it to that card's balance.
+  - **Cards:** Credit card balances with payoff dates and interest. Make a payment or add a charge at any time, outside the monthly schedule; each card lists its recent activity.
+  - **Loans:** Car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends. Extra payments can be made at any time.
 - **Income tab:**
-  - **Income:** Set up income pay periods, defining either fixed income, salaries, and payment frequencies.
+  - **Income:** Set up income pay periods, defining either fixed income, salaries, and payment frequencies. When a paycheck comes in different (hours, overtime), enter what you actually made; it replaces the usual amount for that payday only.
   - **Savings Goals:** Set goals to save towards, including sales tax and a target date. Targeted savings goals are prioritized over non-targeted ones to ensure goals are met.
 - **Dashboard credit utilization:** Current vs. target (under 30%, ideally 10%), how much to pay down, and per-card figures.
 - **Calendar:** Monthly view of due dates, paydays and spending; tap a day to see or pay what's on it.
@@ -71,6 +72,8 @@ src/context/                 FinanceContext (vault data + actions), EditorContex
 src/types.ts                 the vault's data model
 src/utils/schedule.ts        expands bills, card payments and paychecks into dated occurrences
 src/utils/                   payPeriod, budgets, cards, reminders, notifications, biometrics, crypto, storage
+src/**/__tests__/            Jest tests: date/schedule/money logic, vault encryption, FinanceContext, screens
+src/test-utils/              test helpers: stand-ins for device services, a vault-backed render, a fixed "today"
 plugins/                     config plugin that drops the push entitlement (Billy only uses local notifications)
 assets/                      Noto Serif fonts, logos, app icon/splash/notification images
 ```

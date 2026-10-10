@@ -1,4 +1,4 @@
-import { isLoan, type CreditCard } from '../types';
+import { isLoan, type Budget, type CardTransaction, type CreditCard, type SpendingEntry } from '../types';
 import { addMonthsClamped, parseISODate, startOfToday } from './dates';
 import { cardDueDates } from './schedule';
 
@@ -163,4 +163,37 @@ export function checkPromo(loan: CreditCard, today: Date = startOfToday()): Prom
         clearsInTime: paymentsLeft > 0 && loan.plannedPayment * paymentsLeft >= loan.balance - 0.005,
         expired: promoEnd < today,
     };
+}
+
+export interface CardActivity {
+    id: string;
+    /** 'spending' is budget spending put on the card; deleting it also removes it from the budget. */
+    source: 'transaction' | 'spending';
+    date: string;
+    label: string;
+    /** Positive raises the balance (charges), negative lowers it (payments). */
+    amount: number;
+}
+
+/** One-off payments and charges on a card or loan, including budget spending put on it, newest first. */
+export function getCardActivity(
+    cardId: string,
+    data: { cardTransactions: CardTransaction[]; spending: SpendingEntry[]; budgets: Budget[] }
+): CardActivity[] {
+    const transactions = data.cardTransactions
+        .filter(t => t.cardId === cardId)
+        .map((t): CardActivity => ({
+            id: t.id,
+            source: 'transaction',
+            date: t.date,
+            label: t.note || (t.type === 'payment' ? 'Payment' : 'Charge'),
+            amount: t.type === 'payment' ? -t.amount : t.amount,
+        }));
+    const spending = data.spending
+        .filter(e => e.cardId === cardId)
+        .map((e): CardActivity => {
+            const budget = data.budgets.find(b => b.id === e.budgetId)?.name ?? 'Budget';
+            return { id: e.id, source: 'spending', date: e.date, label: e.note ? `${budget} · ${e.note}` : budget, amount: e.amount };
+        });
+    return [...transactions, ...spending].sort((a, b) => b.date.localeCompare(a.date));
 }

@@ -15,21 +15,26 @@ import ProgressBar from './ui/ProgressBar';
 const VISIBLE_ENTRIES = 5;
 
 export default function Budgets() {
-    const { data, budgets, spending, deleteBudget, deleteSpending } = useFinance();
+    const { data, budgets, spending, cards, deleteBudget, deleteSpending } = useFinance();
     const { openBudgetEditor, openSpendingEditor } = useEditor();
     const today = startOfToday();
     const payPeriod = getPayPeriod(data.incomes, data.settings.payPeriodIncomeId, today);
     const payWindow = payPeriod ? { start: payPeriod.start, end: payPeriod.end } : null;
+    const cardName = (id: string | undefined) => cards.find(c => c.id === id)?.name;
 
     const handleDeleteBudget = async (budget: Budget) => {
         haptics.warning();
-        if (await confirmAsync('Delete Budget', `Delete "${budget.name}" and everything logged against it? This cannot be undone.`, { confirmText: 'Delete', destructive: true })) {
+        const onCards = spending.some(e => e.budgetId === budget.id && cardName(e.cardId));
+        const message = `Delete "${budget.name}" and everything logged against it?${onCards ? ' Spending put on a card stays on the card as a charge.' : ''} This cannot be undone.`;
+        if (await confirmAsync('Delete Budget', message, { confirmText: 'Delete', destructive: true })) {
             deleteBudget(budget.id);
         }
     };
 
     const handleDeleteEntry = async (entry: SpendingEntry) => {
-        if (await confirmAsync('Delete Entry', `Delete ${formatMoney(entry.amount)}${entry.note ? ` (${entry.note})` : ''} from ${formatISODate(entry.date)}?`, { confirmText: 'Delete', destructive: true })) {
+        const card = cardName(entry.cardId);
+        const message = `Delete ${formatMoney(entry.amount)}${entry.note ? ` (${entry.note})` : ''} from ${formatISODate(entry.date)}?${card ? ` It also comes off ${card}'s balance.` : ''}`;
+        if (await confirmAsync('Delete Entry', message, { confirmText: 'Delete', destructive: true })) {
             deleteSpending(entry.id);
         }
     };
@@ -81,7 +86,10 @@ export default function Budgets() {
                                     <ScalePressable key={entry.id} pressedScale={0.98} onPress={() => handleDeleteEntry(entry)} accessibilityLabel={`Delete ${entry.note ?? 'entry'}`}>
                                         <View style={styles.entry}>
                                             <AppText variant="small" muted style={styles.entryDate}>{formatShortDate(parseISODate(entry.date))}</AppText>
-                                            <AppText variant="small" style={styles.flex} numberOfLines={1}>{entry.note || 'Spending'}</AppText>
+                                            <AppText variant="small" style={styles.flex} numberOfLines={1}>
+                                                {entry.note || 'Spending'}
+                                                {!!cardName(entry.cardId) && <AppText variant="small" muted>{` · ${cardName(entry.cardId)}`}</AppText>}
+                                            </AppText>
                                             <AppText variant="small">{formatMoney(entry.amount)}</AppText>
                                         </View>
                                     </ScalePressable>

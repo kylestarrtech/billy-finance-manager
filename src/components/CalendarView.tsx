@@ -64,8 +64,8 @@ function Marker({ kind, size = 6 }: { kind: MarkerKind; size?: number }) {
 }
 
 export default function CalendarView() {
-    const { data, spending, budgets } = useFinance();
-    const { openPaymentSheet } = useEditor();
+    const { data, spending, budgets, cards, cardTransactions } = useFinance();
+    const { openPaymentSheet, openActualPaySheet } = useEditor();
     const today = startOfToday();
     const [month, setMonth] = useState(() => startOfMonth(today));
     const [selected, setSelected] = useState<Date>(today);
@@ -79,7 +79,7 @@ export default function CalendarView() {
     const { dueByDay, incomeByDay, totals } = useMemo(() => {
         const end = endOfMonth(month);
         const due = getDueItems(data, month, end, startOfToday());
-        const income = getIncomeItems(data.incomes, month, end);
+        const income = getIncomeItems(data, month, end);
         const dueMap = new Map<string, DueItem[]>();
         const incomeMap = new Map<string, IncomeItem[]>();
         for (const item of due) dueMap.set(item.dueDate, [...(dueMap.get(item.dueDate) ?? []), item]);
@@ -116,7 +116,9 @@ export default function CalendarView() {
     const selectedDue = dueByDay.get(selectedKey) ?? [];
     const selectedIncome = incomeByDay.get(selectedKey) ?? [];
     const selectedSpending = spending.filter(e => e.date === selectedKey);
+    const selectedCardActivity = cardTransactions.filter(t => t.date === selectedKey);
     const budgetName = (id: string) => budgets.find(b => b.id === id)?.name ?? 'Budget';
+    const cardName = (id: string | undefined) => cards.find(c => c.id === id)?.name;
 
     return (
         <View style={styles.page}>
@@ -181,7 +183,7 @@ export default function CalendarView() {
 
             <Card style={styles.dayCard}>
                 <AppText variant="h3">{isSameDay(selected, today) ? `Today · ${formatLongDate(selected)}` : formatLongDate(selected)}</AppText>
-                {selectedDue.length === 0 && selectedIncome.length === 0 && selectedSpending.length === 0 && (
+                {selectedDue.length === 0 && selectedIncome.length === 0 && selectedSpending.length === 0 && selectedCardActivity.length === 0 && (
                     <AppText muted>Nothing due or coming in.</AppText>
                 )}
                 {selectedDue.map(item => {
@@ -204,17 +206,31 @@ export default function CalendarView() {
                     );
                 })}
                 {selectedIncome.map(item => (
-                    <View key={item.key} style={styles.row}>
-                        <Marker kind="income" size={10} />
-                        <AppText bold style={styles.flex}>{item.name}</AppText>
-                        <AppText bold color={colors.gain}>{`+${formatMoney(item.amount)}`}</AppText>
-                    </View>
+                    <ScalePressable key={item.key} pressedScale={0.98} onPress={() => openActualPaySheet(item.incomeId, item.payDate)} accessibilityLabel={`${item.name}, income`}>
+                        <View style={styles.row}>
+                            <Marker kind="income" size={10} />
+                            <View style={styles.flex}>
+                                <AppText bold>{item.name}</AppText>
+                                <AppText variant="small" muted>{item.actual ? 'Actual pay · tap to change' : 'Expected · tap to enter actual pay'}</AppText>
+                            </View>
+                            <AppText bold color={colors.gain}>{`+${formatMoney(item.amount)}`}</AppText>
+                        </View>
+                    </ScalePressable>
                 ))}
                 {selectedSpending.map(entry => (
                     <View key={entry.id} style={styles.row}>
                         <View style={[styles.dot, styles.rowDot, { backgroundColor: colors.placeholder }]} />
-                        <AppText style={styles.flex}>{`${budgetName(entry.budgetId)}${entry.note ? ` · ${entry.note}` : ''}`}</AppText>
+                        <AppText style={styles.flex}>{`${budgetName(entry.budgetId)}${entry.note ? ` · ${entry.note}` : ''}${cardName(entry.cardId) ? ` · ${cardName(entry.cardId)}` : ''}`}</AppText>
                         <AppText muted>{formatMoney(entry.amount)}</AppText>
+                    </View>
+                ))}
+                {selectedCardActivity.map(entry => (
+                    <View key={entry.id} style={styles.row}>
+                        <View style={[styles.dot, styles.rowDot, { backgroundColor: colors.placeholder }]} />
+                        <AppText style={styles.flex}>{`${cardName(entry.cardId) ?? 'Card'} · ${entry.note || (entry.type === 'payment' ? 'Payment' : 'Charge')}`}</AppText>
+                        <AppText muted color={entry.type === 'payment' ? colors.gain : undefined}>
+                            {`${entry.type === 'payment' ? '-' : '+'}${formatMoney(entry.amount)}`}
+                        </AppText>
                     </View>
                 ))}
             </Card>
