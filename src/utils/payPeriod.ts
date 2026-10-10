@@ -54,6 +54,8 @@ export interface PayPeriodSummary {
     cardsTotal: number;
     budgetLines: { budget: Budget; amount: number }[];
     budgetsTotal: number;
+    /** One-off card and loan payments made during this pay period, on top of the scheduled ones. */
+    extraPaymentsTotal: number;
     /** Put toward savings goals during this pay period. */
     savedTotal: number;
     /** What's left after bills, card payments and budgets. */
@@ -66,24 +68,22 @@ export function getPayPeriodSummary(data: VaultData, today: Date): PayPeriodSumm
     const period = getPayPeriod(data.incomes, data.settings.payPeriodIncomeId, today);
     if (!period) return null;
 
-    const incomeItems = getIncomeItems(data.incomes, period.start, period.end);
+    const incomeItems = getIncomeItems(data, period.start, period.end);
     const dueItems = getDueItems(data, period.start, period.end, today);
     const budgetLines = data.budgets.map(budget => ({ budget, amount: budgetForDays(budget, period.days) }));
 
     const sum = (values: number[]) => values.reduce((total, v) => total + v, 0);
+    const inPeriod = (isoDate: string) => {
+        const date = parseISODate(isoDate);
+        return date >= period.start && date <= period.end;
+    };
     const incomeTotal = sum(incomeItems.map(i => i.amount));
     const billsTotal = sum(dueItems.filter(d => d.kind === 'bill').map(d => d.amount));
     const cardsTotal = sum(dueItems.filter(d => d.kind === 'card').map(d => d.amount));
     const budgetsTotal = sum(budgetLines.map(l => l.amount));
-    const savedTotal = sum(
-        data.contributions
-            .filter(c => {
-                const date = parseISODate(c.date);
-                return date >= period.start && date <= period.end;
-            })
-            .map(c => c.amount)
-    );
-    const free = incomeTotal - billsTotal - cardsTotal - budgetsTotal - savedTotal;
+    const extraPaymentsTotal = sum(data.cardTransactions.filter(t => t.type === 'payment' && inPeriod(t.date)).map(t => t.amount));
+    const savedTotal = sum(data.contributions.filter(c => inPeriod(c.date)).map(c => c.amount));
+    const free = incomeTotal - billsTotal - cardsTotal - budgetsTotal - extraPaymentsTotal - savedTotal;
 
     return {
         period,
@@ -94,6 +94,7 @@ export function getPayPeriodSummary(data: VaultData, today: Date): PayPeriodSumm
         cardsTotal,
         budgetLines,
         budgetsTotal,
+        extraPaymentsTotal,
         savedTotal,
         free,
         perDay: period.days > 0 ? free / period.days : free,

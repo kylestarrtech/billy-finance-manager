@@ -14,6 +14,10 @@ export interface EditorContextType {
     openSpendingEditor: (budgetId?: string) => void;
     /** Mark a bill/card occurrence as paid (or edit/undo its payment). */
     openPaymentSheet: (due: DueItem) => void;
+    /** A one-off payment or charge on a card or loan, outside its monthly schedule. */
+    openCardTransactionEditor: (cardId: string) => void;
+    /** Enter what a paycheck actually came to, starting on `payDate` (default: the latest payday). */
+    openActualPaySheet: (incomeId: string, payDate?: string) => void;
     openGoalEditor: (goal?: SavingsGoal) => void;
     /** Log money put toward a goal, optionally pre-filling Billy's suggested amount. */
     openContributionEditor: (goalId: string, suggested?: number) => void;

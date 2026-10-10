@@ -11,12 +11,13 @@ import AppText from './ui/AppText';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import ProgressBar from './ui/ProgressBar';
+import CardActivityList from './CardActivityList';
 
 // Loans and financed purchases: installment debt paid down monthly. Unlike credit cards they don't count
 // toward credit utilization, and they can carry a promotional (deferred-interest) end date.
 export default function Loans() {
     const { cards: debts, payments, deleteCard } = useFinance();
-    const { openCardEditor, openPaymentSheet } = useEditor();
+    const { openCardEditor, openPaymentSheet, openCardTransactionEditor } = useEditor();
     const today = startOfToday();
     const loans = debts.filter(isLoan);
     const summary = getCardsSummary(loans, today);
@@ -83,9 +84,12 @@ export default function Loans() {
                             <AppText variant="h3" style={styles.flex}>{loan.name}</AppText>
                             <AppText variant="small" muted>{loan.apr > 0 ? `${loan.apr}% APR` : '0% APR'}</AppText>
                         </View>
-                        <AppText style={styles.balance} color={loan.balance > 0 ? colors.loss : colors.gain}>
-                            {loan.balance > 0 ? `${formatMoney(loan.balance)} left` : 'Paid off'}
-                        </AppText>
+                        <View style={styles.balanceRow}>
+                            <AppText style={[styles.balance, styles.flex]} color={loan.balance > 0 ? colors.loss : colors.gain} adjustsFontSizeToFit numberOfLines={1}>
+                                {loan.balance > 0 ? `${formatMoney(loan.balance)} left` : 'Paid off'}
+                            </AppText>
+                            {loan.balance > 0 && <Button title="Pay Extra" small onPress={() => openCardTransactionEditor(loan.id)} />}
+                        </View>
 
                         {paidRatio !== null && (
                             <View style={styles.progress}>
@@ -137,6 +141,8 @@ export default function Loans() {
                             <AppText variant="small" color={colors.gain}>{`✓ Last paid: ${formatMoney(lastPayment.amount)}`}</AppText>
                         )}
 
+                        <CardActivityList card={loan} />
+
                         <View style={styles.actions}>
                             {nextDue && <Button title="Mark Paid" variant="primary" small onPress={() => openPaymentSheet(nextDue)} />}
                             <Button title="Edit" variant="secondary" small onPress={() => openCardEditor(loan)} />
@@ -176,6 +182,11 @@ const styles = StyleSheet.create({
         fontSize: 32,
         lineHeight: 42,
         fontFamily: fonts.bold,
+    },
+    balanceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
     },
     balance: {
         fontSize: 24,

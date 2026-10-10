@@ -1,4 +1,4 @@
-import { PaymentFrequency, isLoan, type Bill, type CreditCard, type Income, type Payment } from '../types';
+import { PaymentFrequency, isLoan, type Bill, type CreditCard, type Income, type IncomeActual, type Payment } from '../types';
 import { addDays, addMonthsClamped, daysBetween, lastDayOfMonth, parseISODate, startOfToday, toISODate } from './dates';
 
 // Single source of truth for "when does this happen": the calendar, upcoming list, pay period, reminders
@@ -123,8 +123,11 @@ export interface IncomeItem {
     key: string;
     incomeId: string;
     name: string;
+    /** The income's usual amount, or what the paycheck actually came to once that's entered. */
     amount: number;
     date: Date;
+    payDate: string;
+    actual?: IncomeActual;
 }
 
 export const dueKey = (kind: Payment['kind'], itemId: string, dueDate: string) => `${kind}:${itemId}:${dueDate}`;
@@ -185,16 +188,31 @@ export function getDueItems(
     return items.sort(byDateThenName);
 }
 
-/** Every paycheck/income payment within [from, to] (inclusive), honouring income end dates. */
-export function getIncomeItems(incomes: Income[], from: Date, to: Date): IncomeItem[] {
+export const incomeKey = (incomeId: string, payDate: string) => `income:${incomeId}:${payDate}`;
+
+/** Every paycheck/income payment within [from, to] (inclusive), honouring income end dates and actual amounts. */
+export function getIncomeItems(data: { incomes: Income[]; incomeActuals: IncomeActual[] }, from: Date, to: Date): IncomeItem[] {
+    const actualsByKey = new Map(data.incomeActuals.map(a => [incomeKey(a.incomeId, a.payDate), a]));
     const items: IncomeItem[] = [];
-    for (const income of incomes) {
+    for (const income of data.incomes) {
         const end = income.endingPaymentDate ? parseISODate(income.endingPaymentDate) : undefined;
         for (const date of occurrencesInRange(parseISODate(income.initialPaymentDate), income.frequency, from, to, end)) {
-            items.push({ key: `income:${income.id}:${toISODate(date)}`, incomeId: income.id, name: income.name, amount: income.amount, date });
+            const payDate = toISODate(date);
+            const key = incomeKey(income.id, payDate);
+            const actual = actualsByKey.get(key);
+            items.push({ key, incomeId: income.id, name: income.name, amount: actual?.amount ?? income.amount, date, payDate, actual });
         }
     }
     return items.sort(byDateThenName);
+}
+
+/** An income's most recent paydays (up to today) and its next one, newest first: the paychecks worth correcting. */
+export function recentPaydays(income: Income, today: Date = startOfToday(), count = 4): Date[] {
+    const start = parseISODate(income.initialPaymentDate);
+    const end = income.endingPaymentDate ? parseISODate(income.endingPaymentDate) : undefined;
+    const past = occurrencesInRange(start, income.frequency, addDays(today, -400), today, end).slice(-count);
+    const [next] = occurrencesInRange(start, income.frequency, addDays(today, 1), addDays(today, 400), end);
+    return [...(next ? [next] : []), ...past.reverse()];
 }
 
 /** How many days back an unpaid bill still counts as "overdue" rather than history from before tracking. */

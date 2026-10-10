@@ -11,12 +11,13 @@ import AppText from './ui/AppText';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import ProgressBar from './ui/ProgressBar';
+import CardActivityList from './CardActivityList';
 
 export default function Cards() {
     const { cards: debts, payments, deleteCard } = useFinance();
     // Loans / financing share the same records but live in their own section.
     const cards = debts.filter(c => !isLoan(c));
-    const { openCardEditor, openPaymentSheet } = useEditor();
+    const { openCardEditor, openPaymentSheet, openCardTransactionEditor } = useEditor();
     const today = startOfToday();
     const summary = getCardsSummary(cards, today);
     const cardsWithBalance = cards.filter(c => c.balance > 0);
@@ -85,9 +86,12 @@ export default function Cards() {
                             <AppText variant="h3" style={styles.flex}>{card.name}</AppText>
                             <AppText variant="small" muted>{`${card.apr}% APR`}</AppText>
                         </View>
-                        <AppText style={styles.balance} color={card.balance > 0 ? colors.loss : colors.gain}>
-                            {card.balance > 0 ? formatMoney(card.balance) : 'Paid off'}
-                        </AppText>
+                        <View style={styles.balanceRow}>
+                            <AppText style={[styles.balance, styles.flex]} color={card.balance > 0 ? colors.loss : colors.gain} adjustsFontSizeToFit numberOfLines={1}>
+                                {card.balance > 0 ? formatMoney(card.balance) : 'Paid off'}
+                            </AppText>
+                            <Button title="Pay / Charge" small onPress={() => openCardTransactionEditor(card.id)} />
+                        </View>
 
                         {used !== null && (
                             <View style={styles.utilization}>
@@ -123,6 +127,8 @@ export default function Cards() {
                         {lastPayment && (
                             <AppText variant="small" color={colors.gain}>{`✓ Last paid: ${formatMoney(lastPayment.amount)}`}</AppText>
                         )}
+
+                        <CardActivityList card={card} />
 
                         <View style={styles.actions}>
                             {nextDue && <Button title="Mark Paid" variant="primary" small onPress={() => openPaymentSheet(nextDue)} />}
@@ -163,6 +169,11 @@ const styles = StyleSheet.create({
         fontSize: 32,
         lineHeight: 42,
         fontFamily: fonts.bold,
+    },
+    balanceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
     },
     balance: {
         fontSize: 24,

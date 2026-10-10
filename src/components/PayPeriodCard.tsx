@@ -1,9 +1,11 @@
 import { StyleSheet, View } from 'react-native';
 import { useFinance } from '../context/FinanceContext';
+import { useEditor } from '../context/EditorContext';
 import { getPayPeriodSummary } from '../utils/payPeriod';
-import { formatMoney, formatShortDate, startOfToday } from '../utils/dates';
+import { formatMoney, formatShortDate, startOfToday, toISODate } from '../utils/dates';
 import { colors, fonts } from '../theme';
 import AppText from './ui/AppText';
+import Button from './ui/Button';
 import Card from './ui/Card';
 
 function Line({ label, value, detail, color }: { label: string; value: string; detail?: string; color?: string }) {
@@ -22,12 +24,16 @@ function Line({ label, value, detail, color }: { label: string; value: string; d
 // are set aside.
 export default function PayPeriodCard() {
     const { data } = useFinance();
+    const { openActualPaySheet } = useEditor();
     const summary = getPayPeriodSummary(data, startOfToday());
     if (!summary) return null;
 
     const { period } = summary;
     const bills = summary.dueItems.filter(d => d.kind === 'bill');
     const paidBills = bills.filter(d => d.payment).length;
+    const actualPaychecks = summary.incomeItems.filter(i => i.actual).length;
+    const startPayDate = toISODate(period.start);
+    const hasActualPay = summary.incomeItems.some(i => i.incomeId === period.income.id && i.payDate === startPayDate && i.actual);
     const positive = summary.free >= 0;
 
     return (
@@ -47,7 +53,12 @@ export default function PayPeriodCard() {
             </AppText>
 
             <View style={styles.breakdown}>
-                <Line label="Income" value={`+${formatMoney(summary.incomeTotal)}`} color={colors.gain} />
+                <Line
+                    label="Income"
+                    value={`+${formatMoney(summary.incomeTotal)}`}
+                    color={colors.gain}
+                    detail={actualPaychecks === 0 ? undefined : actualPaychecks === summary.incomeItems.length ? 'actual' : `${actualPaychecks} of ${summary.incomeItems.length} actual`}
+                />
                 <Line
                     label="Bills"
                     value={`-${formatMoney(summary.billsTotal)}`}
@@ -55,7 +66,18 @@ export default function PayPeriodCard() {
                 />
                 {summary.cardsTotal > 0 && <Line label={summary.dueItems.some(d => d.isLoan) ? 'Card & loan payments' : 'Card payments'} value={`-${formatMoney(summary.cardsTotal)}`} />}
                 {summary.budgetsTotal > 0 && <Line label="Budgets" value={`-${formatMoney(summary.budgetsTotal)}`} detail="(Set aside)" />}
+                {summary.extraPaymentsTotal > 0 && <Line label="Extra debt payments" value={`-${formatMoney(summary.extraPaymentsTotal)}`} />}
                 {summary.savedTotal !== 0 && <Line label="Saved toward goals" value={`-${formatMoney(summary.savedTotal)}`} />}
+            </View>
+
+            {/* Paychecks that vary (hours, overtime) can be corrected to what actually came in. */}
+            <View style={styles.actions}>
+                <Button
+                    title={hasActualPay ? 'Edit Actual Pay' : 'Enter Actual Pay'}
+                    variant="secondary"
+                    small
+                    onPress={() => openActualPaySheet(period.income.id, startPayDate)}
+                />
             </View>
         </Card>
     );
@@ -82,6 +104,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'baseline',
         gap: 8,
+    },
+    actions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        marginTop: 10,
     },
     flex: {
         flex: 1,

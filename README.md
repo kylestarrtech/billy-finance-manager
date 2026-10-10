@@ -42,11 +42,11 @@ Free Apple ID signatures expire after **7 days**. Sideloadly's auto-refresh re-s
 - **Dashboard:** Pay-period budgets, upcoming and overdue bills, credit utilization monthly income and expenses, 50/30/20 split suggestions, and cash-flow charts.
 - **Bills tab:**
   - **Bills:** Fixed bills with paid tracking and the actual amount paid.
-  - **Budgets:** Variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left.
-  - **Cards:** Credit card balances with payoff dates and interest.
-  - **Loans:** Car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends.
+  - **Budgets:** Variable spending like groceries, set weekly, monthly or per pay period, with logged spending and what's left. Spending can be put on a credit card, which adds it to that card's balance.
+  - **Cards:** Credit card balances with payoff dates and interest. Make a payment or add a charge at any time, outside the monthly schedule; each card lists its recent activity.
+  - **Loans:** Car loans and financed purchases, with progress, payoff dates and a warning when a 0% promo won't be cleared before it ends. Extra payments can be made at any time.
 - **Income tab:**
-  - **Income:** Set up income pay periods, defining either fixed income, salaries, and payment frequencies.
+  - **Income:** Set up income pay periods, defining either fixed income, salaries, and payment frequencies. When a paycheck comes in different (hours, overtime), enter what you actually made; it replaces the usual amount for that payday only.
   - **Savings Goals:** Set goals to save towards, including sales tax and a target date. Targeted savings goals are prioritized over non-targeted ones to ensure goals are met.
 - **Dashboard credit utilization:** Current vs. target (under 30%, ideally 10%), how much to pay down, and per-card figures.
 - **Calendar:** Monthly view of due dates, paydays and spending; tap a day to see or pay what's on it.

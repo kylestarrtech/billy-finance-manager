@@ -7,9 +7,11 @@ import {
     type AppSettings,
     type Bill,
     type Budget,
+    type CardTransaction,
     type CreditCard,
     type GoalContribution,
     type Income,
+    type IncomeActual,
     type SavingsGoal,
     type Payment,
     type SpendingEntry,
@@ -28,7 +30,7 @@ import {
 } from '../utils/biometrics';
 import { buildReminderPlan } from '../utils/reminders';
 import { cancelAllReminders, hasReminderPermission, scheduleReminders } from '../utils/notifications';
-import { dueKey } from '../utils/schedule';
+import { dueKey, incomeKey } from '../utils/schedule';
 import { loadVaultData } from '../utils/migrate';
 
 export * from '../types';
@@ -46,10 +48,12 @@ interface FinanceContextType {
     data: VaultData;
     bills: Bill[];
     incomes: Income[];
+    incomeActuals: IncomeActual[];
     payments: Payment[];
     budgets: Budget[];
     spending: SpendingEntry[];
     cards: CreditCard[];
+    cardTransactions: CardTransaction[];
     goals: SavingsGoal[];
     contributions: GoalContribution[];
     settings: AppSettings;
@@ -67,9 +71,13 @@ interface FinanceContextType {
     addIncome: (income: Omit<Income, 'id'>) => void;
     editIncome: (id: string, updatedIncome: Omit<Income, 'id'>) => void;
     deleteIncome: (id: string) => void;
+    /** Records (or updates) what the paycheck on `payDate` actually came to. */
+    setIncomeActual: (incomeId: string, payDate: string, amount: number) => void;
+    deleteIncomeActual: (id: string) => void;
     addBudget: (budget: Omit<Budget, 'id'>) => void;
     editBudget: (id: string, budget: Omit<Budget, 'id'>) => void;
     deleteBudget: (id: string) => void;
+    /** Logs spending; when it's on a card, the card's balance goes up too. */
     addSpending: (entry: Omit<SpendingEntry, 'id'>) => void;
     deleteSpending: (id: string) => void;
     addGoal: (goal: Omit<SavingsGoal, 'id'>) => void;
@@ -80,6 +88,9 @@ interface FinanceContextType {
     addCard: (card: Omit<CreditCard, 'id'>) => void;
     editCard: (id: string, card: Omit<CreditCard, 'id'>) => void;
     deleteCard: (id: string) => void;
+    /** A one-off payment or charge on a card or loan, adjusting its balance. */
+    addCardTransaction: (entry: Omit<CardTransaction, 'id'>) => void;
+    deleteCardTransaction: (id: string) => void;
     /** Records (or updates) a payment for one due occurrence. Card payments reduce the card's balance. */
     markPaid: (due: DueRef, amount: number, paidDate: string) => void;
     unmarkPaid: (paymentId: string) => void;
@@ -105,7 +116,7 @@ const removeExportFile = () => {
     }
 };
 
-type ListKey = 'bills' | 'incomes' | 'budgets' | 'spending' | 'cards' | 'payments' | 'goals' | 'contributions';
+type ListKey = 'bills' | 'incomes' | 'incomeActuals' | 'budgets' | 'spending' | 'cards' | 'cardTransactions' | 'payments' | 'goals' | 'contributions';
 
 export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
@@ -260,22 +271,63 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         setData(d => ({
             ...d,
             incomes: d.incomes.filter(income => income.id !== id),
+            incomeActuals: d.incomeActuals.filter(a => a.incomeId !== id),
             settings: d.settings.payPeriodIncomeId === id ? { ...d.settings, payPeriodIncomeId: undefined } : d.settings,
         }));
     };
 
+    const setIncomeActual = (incomeId: string, payDate: string, amount: number) => {
+        setData(d => {
+            const key = incomeKey(incomeId, payDate);
+            const existing = d.incomeActuals.find(a => incomeKey(a.incomeId, a.payDate) === key);
+            const actual: IncomeActual = { id: existing?.id ?? randomUUID(), incomeId, payDate, amount };
+            return {
+                ...d,
+                incomeActuals: existing ? d.incomeActuals.map(a => (a.id === existing.id ? actual : a)) : [...d.incomeActuals, actual],
+            };
+        });
+    };
+    const deleteIncomeActual = (id: string) => setData(d => ({ ...d, incomeActuals: d.incomeActuals.filter(a => a.id !== id) }));
+
     const addBudget = (budget: Omit<Budget, 'id'>) => addTo('budgets', budget);
     const editBudget = (id: string, budget: Omit<Budget, 'id'>) => replaceIn('budgets', id, budget);
     const deleteBudget = (id: string) => {
-        setData(d => ({
-            ...d,
-            budgets: d.budgets.filter(b => b.id !== id),
-            spending: d.spending.filter(e => e.budgetId !== id),
-        }));
+        setData(d => {
+            const name = d.budgets.find(b => b.id === id)?.name ?? 'Budget';
+            // Spending put on a card still happened, so it stays on the card as a plain charge.
+            const charges = d.spending
+                .filter(e => e.budgetId === id && e.cardId && d.cards.some(c => c.id === e.cardId))
+                .map((e): CardTransaction => ({ id: e.id, cardId: e.cardId!, type: 'charge', amount: e.amount, date: e.date, note: e.note ? `${name} · ${e.note}` : name }));
+            return {
+                ...d,
+                budgets: d.budgets.filter(b => b.id !== id),
+                spending: d.spending.filter(e => e.budgetId !== id),
+                cardTransactions: [...d.cardTransactions, ...charges],
+            };
+        });
     };
 
-    const addSpending = (entry: Omit<SpendingEntry, 'id'>) => addTo('spending', entry);
-    const deleteSpending = (id: string) => setData(d => ({ ...d, spending: d.spending.filter(e => e.id !== id) }));
+    // Lowers the balance by `paidDelta`; charges pass a negative amount to raise it.
+    const adjustCardBalance = (cards: CreditCard[], cardId: string, paidDelta: number) =>
+        cards.map(c => (c.id === cardId ? { ...c, balance: Math.max(0, Math.round((c.balance - paidDelta) * 100) / 100) } : c));
+
+    const addSpending = (entry: Omit<SpendingEntry, 'id'>) => {
+        setData(d => ({
+            ...d,
+            spending: [...d.spending, { ...entry, id: randomUUID() }],
+            cards: entry.cardId ? adjustCardBalance(d.cards, entry.cardId, -entry.amount) : d.cards,
+        }));
+    };
+    const deleteSpending = (id: string) => {
+        setData(d => {
+            const entry = d.spending.find(e => e.id === id);
+            return {
+                ...d,
+                spending: d.spending.filter(e => e.id !== id),
+                cards: entry?.cardId ? adjustCardBalance(d.cards, entry.cardId, entry.amount) : d.cards,
+            };
+        });
+    };
 
     const addGoal = (goal: Omit<SavingsGoal, 'id'>) => addTo('goals', goal);
     const editGoal = (id: string, goal: Omit<SavingsGoal, 'id'>) => replaceIn('goals', id, goal);
@@ -297,11 +349,30 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             ...d,
             cards: d.cards.filter(c => c.id !== id),
             payments: d.payments.filter(p => !(p.kind === 'card' && p.itemId === id)),
+            cardTransactions: d.cardTransactions.filter(t => t.cardId !== id),
+            // Spending put on the card still counts toward its budget.
+            spending: d.spending.map(e => (e.cardId === id ? { ...e, cardId: undefined } : e)),
         }));
     };
 
-    const adjustCardBalance = (cards: CreditCard[], cardId: string, paidDelta: number) =>
-        cards.map(c => (c.id === cardId ? { ...c, balance: Math.max(0, Math.round((c.balance - paidDelta) * 100) / 100) } : c));
+    const addCardTransaction = (entry: Omit<CardTransaction, 'id'>) => {
+        setData(d => ({
+            ...d,
+            cardTransactions: [...d.cardTransactions, { ...entry, id: randomUUID() }],
+            cards: adjustCardBalance(d.cards, entry.cardId, entry.type === 'payment' ? entry.amount : -entry.amount),
+        }));
+    };
+    const deleteCardTransaction = (id: string) => {
+        setData(d => {
+            const entry = d.cardTransactions.find(t => t.id === id);
+            if (!entry) return d;
+            return {
+                ...d,
+                cardTransactions: d.cardTransactions.filter(t => t.id !== id),
+                cards: adjustCardBalance(d.cards, entry.cardId, entry.type === 'payment' ? -entry.amount : entry.amount),
+            };
+        });
+    };
 
     const markPaid = (due: DueRef, amount: number, paidDate: string) => {
         setData(d => {
@@ -377,17 +448,22 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
                     const budgets = pick('budgets');
                     const goals = pick('goals');
                     const billIds = new Set(bills.map(b => b.id));
+                    const incomeIds = new Set(imported.incomes.map(i => i.id));
                     const cardIds = new Set(cards.map(c => c.id));
                     const budgetIds = new Set(budgets.map(b => b.id));
                     const goalIds = new Set(goals.map(g => g.id));
                     return {
                         bills,
                         incomes: imported.incomes,
+                        incomeActuals: pick('incomeActuals').filter(a => incomeIds.has(a.incomeId)),
                         cards,
+                        cardTransactions: pick('cardTransactions').filter(t => cardIds.has(t.cardId)),
                         budgets,
                         goals,
                         payments: pick('payments').filter(p => (p.kind === 'bill' ? billIds : cardIds).has(p.itemId)),
-                        spending: pick('spending').filter(e => budgetIds.has(e.budgetId)),
+                        spending: pick('spending')
+                            .filter(e => budgetIds.has(e.budgetId))
+                            .map(e => (e.cardId && !cardIds.has(e.cardId) ? { ...e, cardId: undefined } : e)),
                         contributions: pick('contributions').filter(c => goalIds.has(c.goalId)),
                         settings: parsed.settings ? imported.settings : current.settings,
                     };
@@ -418,10 +494,12 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             data,
             bills: data.bills,
             incomes: data.incomes,
+            incomeActuals: data.incomeActuals,
             payments: data.payments,
             budgets: data.budgets,
             spending: data.spending,
             cards: data.cards,
+            cardTransactions: data.cardTransactions,
             goals: data.goals,
             contributions: data.contributions,
             settings: data.settings,
@@ -439,6 +517,8 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             addIncome,
             editIncome,
             deleteIncome,
+            setIncomeActual,
+            deleteIncomeActual,
             addBudget,
             editBudget,
             deleteBudget,
@@ -452,6 +532,8 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             addCard,
             editCard,
             deleteCard,
+            addCardTransaction,
+            deleteCardTransaction,
             markPaid,
             unmarkPaid,
             updateSettings,
